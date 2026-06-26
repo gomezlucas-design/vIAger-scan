@@ -23,9 +23,11 @@ function extractViagerData(markdown: string) {
     || clean.match(/([0-9][0-9\s]{2,6})\s*€\s*\/\s*mois/i)
   if (rente) data.rente = parseInt(rente[1].replace(/\s/g, ""))
 
-  // Valeur vénale
+  // Valeur vénale (SeLoger + Renée Costes "valeur du bien")
   const vv = clean.match(/valeur\s*v[eé]nale[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
+    || clean.match(/valeur\s*du\s*bien[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
     || clean.match(/prix\s*(?:du\s*bien|march[eé])[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
+    || clean.match(/estim[eé][^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
   if (vv) data.valeurVenale = parseInt(vv[1].replace(/\s/g, ""))
 
   // Superficie
@@ -38,6 +40,7 @@ function extractViagerData(markdown: string) {
   const age = clean.match(/(?:dame|femme|homme|monsieur|vendeur)[^\d]*(\d{2})\s*ans/i)
     || clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
     || clean.match(/age\s*:\s*(?:femme|homme)\s*de\s*(\d{2})/i)
+    || clean.match(/occup[eé]\s*par[^\d]*(\d{2})\s*ans/i)
   if (age) {
     data.occupant1Age = parseInt(age[1])
     data.occupant1Sexe = /dame|femme/i.test(age[0]) ? "F" : "H"
@@ -45,10 +48,13 @@ function extractViagerData(markdown: string) {
 
   // Taxe foncière
   const tf = clean.match(/taxe\s*fonci[eè]re[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
+    || clean.match(/TF[^\d€]*([0-9][0-9\s]{2,6})\s*€?/)
   if (tf) data.taxeFonciere = parseInt(tf[1].replace(/\s/g, ""))
 
-  // Charges
-  const chg = clean.match(/charges[^\d€]*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*(?:an|trim|mois)/i)
+  // Charges (annuelles, trimestrielles, mensuelles)
+  const chg = clean.match(/charges\s*trimestrielles?[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
+    || clean.match(/charges\s*de\s*copro[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
+    || clean.match(/charges[^\d€]*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*(?:an|trim|mois)/i)
   if (chg) {
     let val = parseInt(chg[1].replace(/\s/g, ""))
     if (/trim/i.test(chg[0])) val = val * 4
@@ -61,7 +67,7 @@ function extractViagerData(markdown: string) {
     || clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]*)*)\s*\(\d{5}\)/i)
   if (ville) data.ville = ville[1].trim()
 
-  const filled = ["bouquet","rente","superficie","occupant1Age","valeurVenale"]
+  const filled = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"]
     .filter(k => data[k] != null).length
   const confidence = filled / 5
 
@@ -88,7 +94,7 @@ async function scrapeWithFirecrawl(url: string) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(`Firecrawl error ${res.status}: ${(err as any).error || res.statusText}`)
+    throw new Error(`Firecrawl ${res.status}: ${(err as any).error || res.statusText}`)
   }
 
   const json = await res.json()
@@ -127,10 +133,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
-          source,
-          url,
-          confidence: 0,
-          data: {},
+          source, url, confidence: 0, data: {},
           error: "Page vide ou bloquée — essaie la saisie manuelle",
         }
       })
