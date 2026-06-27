@@ -1,32 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 
-// ─── URLs RSS SeLoger viager appartement ──────────────────────────────────
-// SeLoger expose des flux RSS sur ses pages de recherche
-// Format: /list.htm?...&tri=d_dt_crea (tri par date) avec .rss en fin
-const RSS_FEEDS = [
-  // Île-de-France
-  "https://www.seloger.com/list.htm?types=2&projects=2&natures=1&places=%5B%7Bci%3A0%7D%5D&enterprise=0&qsVersion=1.0&m=search_refine.rss",
-  // Paris
-  "https://www.seloger.com/list.htm?types=2&projects=2&natures=1&places=%5B%7Bci%3A750056%7D%5D&enterprise=0&qsVersion=1.0&m=search_refine.rss",
-  // PACA
-  "https://www.seloger.com/list.htm?types=2&projects=2&natures=1&places=%5B%7Bci%3A130006%7D%5D&enterprise=0&qsVersion=1.0&m=search_refine.rss",
+const FIRECRAWL_URLS = [
+  "https://www.seloger.com/recherche/achat/appartement/viager/france/",
+  "https://www.costes-viager.com/acheter/annonces",
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2",
 ]
 
-// ─── Renée Costes RSS ─────────────────────────────────────────────────────
-const RC_RSS = "https://www.costes-viager.com/feed/annonces"
-
-interface RSSListing {
-  title: string
+interface Listing {
   url: string
-  pubDate: string
-  description: string
-  source: string
+  titre: string
+  ville?: string
   bouquet?: number
   rente?: number
   superficie?: number
-  ville?: string
-  occupant1Age?: number
-  occupant1Sexe?: string
+  source: string
+  pubDate?: string
 }
 
 function extractNumber(text: string, regex: RegExp): number | undefined {
@@ -35,125 +23,111 @@ function extractNumber(text: string, regex: RegExp): number | undefined {
   return parseInt(m[1].replace(/[\s\u00a0]/g, "")) || undefined
 }
 
-function parseRSSItem(item: string, source: string): RSSListing | null {
-  const title = item.match(/<title[^>]*><!\[CDATA\[([^\]]*)\]\]><\/title>|<title[^>]*>([^<]*)<\/title>/)?.[1] || ""
-  const link = item.match(/<link[^>]*>([^<]*)<\/link>|<link[^>]*\/>/)?.[1] || ""
-  const pubDate = item.match(/<pubDate>([^<]*)<\/pubDate>/)?.[1] || ""
-  const desc = item.match(/<description[^>]*><!\[CDATA\[([^\]]*)\]\]><\/description>|<description[^>]*>([^<]*)<\/description>/)?.[1] || ""
+function extractListings(markdown: string, source: string): Listing[] {
+  const listings: Listing[] = []
+  const lines = markdown.split("\n")
 
-  if (!title && !link) return null
+  // Cherche les URLs d'annonces dans le markdown
+  const urlRegex = /https?:\/\/(?:www\.)?(?:seloger\.com\/annonces|costes-viager\.com\/acheter\/[^)\s"]+|leboncoin\.fr\/ventes_immobilieres\/[^)\s"]+)/gi
+  const urls = [...new Set(markdown.match(urlRegex) || [])]
 
-  const fullText = `${title} ${desc}`
+  for (const url of urls.slice(0, 20)) {
+    const context = markdown.slice(
+      Math.max(0, markdown.indexOf(url) - 300),
+      Math.min(markdown.length, markdown.indexOf(url) + 500)
+    )
 
-  const listing: RSSListing = {
-    title: title.trim(),
-    url: link.trim(),
-    pubDate: pubDate.trim(),
-    description: desc.replace(/<[^>]*>/g, " ").trim().slice(0, 300),
-    source,
-    bouquet: extractNumber(fullText, /bouquet[^\d]*(\d[\d\s]{2,8})\s*€?/i)
-      || extractNumber(fullText, /(\d[\d\s]{4,8})\s*€?\s*(?:FAI|hai)/i),
-    rente: extractNumber(fullText, /rente[^\d]*(\d[\d\s]{2,6})\s*€?\s*\/?\s*mois/i)
-      || extractNumber(fullText, /(\d[\d\s]{2,5})\s*€\s*\/\s*mois/i),
-    superficie: extractNumber(fullText, /(\d{2,3})\s*m²/i),
-    occupant1Age: (() => {
-      const m = fullText.match(/(?:dame|femme|homme)\s+de\s*(\d{2})\s*ans/i)
-        || fullText.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
-      return m ? parseInt(m[1]) : undefined
-    })(),
-    occupant1Sexe: (() => {
-      if (/dame|femme/i.test(fullText)) return "F"
-      if (/homme|monsieur/i.test(fullText)) return "H"
-      return undefined
-    })(),
-    ville: (() => {
-      const m = fullText.match(/([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü0-9][a-zà-ü0-9]*)*)\s*\(\d{5}\)/i)
-        || fullText.match(/situ[eé][^\w]*(?:à|a|au)\s+([A-ZÀ-Ü][a-zà-ü]+)/i)
-      return m?.[1]?.trim()
-    })(),
-  }
+    const bouquet = extractNumber(context, /bouquet[^\d]*(\d[\d\s]{2,7})\s*€?/i)
+    const rente = extractNumber(context, /rente[^\d]*(\d[\d\s]{2,5})\s*€?\s*\/?\s*mois/i)
+    const superficie = extractNumber(context, /(\d{2,3})\s*m²/i)
+    const villeM = context.match(/([A-ZÀ-Ü][a-zà-ü]+(?:[\s-][A-ZÀ-Ü]?[a-zà-ü]+)*)\s*\(\d{5}\)/i)
 
-  return listing
-}
-
-async function fetchRSS(url: string, source: string): Promise<RSSListing[]> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; ViagerScan/1.0)",
-        "Accept": "application/rss+xml, application/xml, text/xml",
-      },
-      next: { revalidate: 3600 }, // cache 1h
+    listings.push({
+      url,
+      titre: villeM ? `Viager ${villeM[1]}` : `Annonce ${source}`,
+      ville: villeM?.[1],
+      bouquet,
+      rente,
+      superficie,
+      source,
+      pubDate: new Date().toISOString(),
     })
-
-    if (!res.ok) {
-      console.warn(`RSS ${source} returned ${res.status}`)
-      return []
-    }
-
-    const xml = await res.text()
-
-    // Extraire les items
-    const items = xml.match(/<item[^>]*>[\s\S]*?<\/item>/gi) || []
-    return items
-      .map(item => parseRSSItem(item, source))
-      .filter(Boolean) as RSSListing[]
-
-  } catch (e: any) {
-    console.error(`RSS fetch error ${source}:`, e.message)
-    return []
   }
+
+  return listings
 }
 
-// ─── Filtrer uniquement les viagers appartement ───────────────────────────
-function isValidViager(listing: RSSListing, bouquetMax = 100000): boolean {
-  // Doit avoir un lien valide
-  if (!listing.url) return false
-  // Filtre bouquet si disponible
-  if (listing.bouquet && listing.bouquet > bouquetMax) return false
-  // Exclure les maisons si mentionné explicitement
-  if (/\bmaison\b|\bvilla\b|\bpavillon\b/i.test(listing.title) &&
-      !/\bappartement\b|\bstudio\b|\bappt?\b/i.test(listing.title)) return false
+async function scrapeWithFirecrawl(url: string): Promise<string> {
+  const apiKey = process.env.FIRECRAWL_API_KEY
+  if (!apiKey) throw new Error("FIRECRAWL_API_KEY manquante")
+
+  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      url,
+      formats: ["markdown"],
+      onlyMainContent: true,
+      waitFor: 3000,
+    }),
+  })
+
+  if (!res.ok) return ""
+  const json = await res.json()
+  return json.data?.markdown || json.markdown || ""
+}
+
+// ─── Filtre annonces ──────────────────────────────────────────────────────
+function passeFiltres(listing: Listing): boolean {
+  // 1. Bouquet < 80 000 € (si connu)
+  if (listing.bouquet && listing.bouquet > 80000) return false
+  // 2. Appartement uniquement — exclure maisons
+  if (/\bmaison\b|\bvilla\b|\bpavillon\b/i.test(listing.titre) &&
+      !/\bappart|\bstudio|\bappt?\b/i.test(listing.titre)) return false
+  // 3. URL valide
+  if (!listing.url || listing.url.length < 20) return false
   return true
 }
 
-// ─── GET /api/rss ─────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const bouquetMax = parseInt(searchParams.get("bouquetMax") || "100000")
-  const limit = parseInt(searchParams.get("limit") || "50")
+  const bouquetMax = parseInt(searchParams.get("bouquetMax") || "80000")
 
   try {
-    // Fetch tous les flux en parallèle
-    const results = await Promise.allSettled([
-      ...RSS_FEEDS.map(url => fetchRSS(url, "SeLoger")),
-      fetchRSS(RC_RSS, "Renée Costes"),
-    ])
+    // Scraper les pages de listing en parallèle
+    const markdowns = await Promise.allSettled(
+      FIRECRAWL_URLS.map(url => scrapeWithFirecrawl(url))
+    )
 
-    const allListings: RSSListing[] = results
-      .filter(r => r.status === "fulfilled")
-      .flatMap(r => (r as PromiseFulfilledResult<RSSListing[]>).value)
+    const sources = ["SeLoger", "Renée Costes", "LeBonCoin"]
+    let allListings: Listing[] = []
 
-    // Filtrer + dédupliquer par URL
-    const seen = new Set<string>()
-    const filtered = allListings
-      .filter(l => {
-        if (seen.has(l.url)) return false
-        seen.add(l.url)
-        return isValidViager(l, bouquetMax)
-      })
-      .slice(0, limit)
-
-    // Trier par date
-    filtered.sort((a, b) => {
-      const da = a.pubDate ? new Date(a.pubDate).getTime() : 0
-      const db = b.pubDate ? new Date(b.pubDate).getTime() : 0
-      return db - da
+    markdowns.forEach((result, i) => {
+      if (result.status === "fulfilled" && result.value) {
+        const listings = extractListings(result.value, sources[i])
+        allListings = [...allListings, ...listings]
+      }
     })
+
+    // Dédupliquer par URL
+    const seen = new Set<string>()
+    const unique = allListings.filter(l => {
+      if (seen.has(l.url)) return false
+      seen.add(l.url)
+      return true
+    })
+
+    // Appliquer les filtres
+    const filtered = unique.filter(l => passeFiltres(l))
 
     return NextResponse.json({
       success: true,
-      count: filtered.length,
+      total: allListings.length,
+      filtered: filtered.length,
+      criteria: { bouquetMax, type: "appartement", zone: "France" },
       lastFetch: new Date().toISOString(),
       listings: filtered,
     })
