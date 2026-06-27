@@ -813,6 +813,8 @@ export default function ViagerScan() {
   const [showImport, setShowImport] = useState(false);
   const [detail, setDetail] = useState<any>(null);
   const [mobile, setMobile] = useState(false);
+  const [dbLoaded, setDbLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     const check = () => setMobile(window.innerWidth < 768);
@@ -820,6 +822,87 @@ export default function ViagerScan() {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  // Charger les annonces depuis Neon au démarrage
+  useEffect(() => {
+    if (dbLoaded) return;
+    fetch("/api/listings?limit=100")
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && json.listings.length > 0) {
+          const mapped = json.listings.map((l: any) => ({
+            id: `db-${l.id}`,
+            source: l.source,
+            ville: l.ville || "Ville inconnue",
+            superficie: l.superficie,
+            valeurVenale: l.valeurVenale,
+            bouquet: l.bouquet,
+            rente: l.rente,
+            occupant1Age: l.occupant1Age || 78,
+            occupant1Sexe: l.occupant1Sexe || "F",
+            taxeFonciere: l.taxeFonciere || 400,
+            chargesCopro: l.chargesCopro || 800,
+            autresCharges: 0,
+            ventilationCharges: 0.33,
+            majorationRenteLiberation: 0.30,
+            tauxInflation: 0.03,
+            tauxCroissanceTF: 0.04,
+            datePublication: l.datePublication || l.createdAt?.slice(0, 10),
+            url: l.url,
+            note: l.notes || "",
+            priceHistory: [{ date: l.createdAt?.slice(0, 10), bouquet: l.bouquet, rente: l.rente }],
+          }));
+          setOffres(prev => {
+            const existingUrls = new Set(prev.map((o: any) => o.url));
+            const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url));
+            return [...prev, ...newOnes];
+          });
+          setDbLoaded(true);
+        }
+      })
+      .catch(() => {});
+  }, [dbLoaded]);
+
+  // Synchroniser les nouvelles annonces depuis SeLoger/Renée Costes
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await fetch("/api/rss");
+      // Recharger depuis Neon après sync
+      const r = await fetch("/api/listings?limit=100");
+      const json = await r.json();
+      if (json.success && json.listings.length > 0) {
+        const mapped = json.listings.map((l: any) => ({
+          id: `db-${l.id}`,
+          source: l.source,
+          ville: l.ville || "Ville inconnue",
+          superficie: l.superficie,
+          valeurVenale: l.valeurVenale,
+          bouquet: l.bouquet,
+          rente: l.rente,
+          occupant1Age: l.occupant1Age || 78,
+          occupant1Sexe: l.occupant1Sexe || "F",
+          taxeFonciere: l.taxeFonciere || 400,
+          chargesCopro: l.chargesCopro || 800,
+          autresCharges: 0,
+          ventilationCharges: 0.33,
+          majorationRenteLiberation: 0.30,
+          tauxInflation: 0.03,
+          tauxCroissanceTF: 0.04,
+          datePublication: l.datePublication || l.createdAt?.slice(0, 10),
+          url: l.url,
+          note: l.notes || "",
+          priceHistory: [{ date: l.createdAt?.slice(0, 10), bouquet: l.bouquet, rente: l.rente }],
+        }));
+        setOffres(prev => {
+          const existingUrls = new Set(prev.map((o: any) => o.url));
+          const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url));
+          return [...prev, ...newOnes];
+        });
+      }
+    } catch {}
+    setSyncing(false);
+  };
 
   const computed = useMemo(() => offres.map(o => ({ offre: o, result: computeViager(o) })), [offres]);
 
@@ -861,10 +944,16 @@ export default function ViagerScan() {
             </div>
             <span style={{ fontSize: 9, color: C.text3, background: C.card, padding: "2px 7px", borderRadius: 20, border: `1px solid ${C.border}`, fontWeight: 600 }}>BETA</span>
           </div>
-          <button onClick={() => setShowImport(true)}
-            style={{ background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: mobile ? "8px 16px" : "9px 20px", cursor: "pointer", fontSize: mobile ? 13 : 13, fontWeight: 700, letterSpacing: ".02em" }}>
-            {mobile ? "+ Importer" : "+ Importer une annonce"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={syncNow} disabled={syncing}
+              style={{ background: C.card, color: syncing ? C.text3 : C.green, border: `1px solid ${C.green}40`, borderRadius: 10, padding: "9px 14px", cursor: syncing ? "wait" : "pointer", fontSize: 12, fontWeight: 700 }}>
+              {syncing ? "⏳" : "⟳"}{mobile ? "" : syncing ? " Sync…" : " Sync"}
+            </button>
+            <button onClick={() => setShowImport(true)}
+              style={{ background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: mobile ? "8px 16px" : "9px 20px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+              {mobile ? "+ Importer" : "+ Importer une annonce"}
+            </button>
+          </div>
         </div>
       </div>
 
