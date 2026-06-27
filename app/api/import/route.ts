@@ -132,6 +132,21 @@ export async function POST(req: NextRequest) {
 
     const { data, confidence } = extractViagerData(markdown)
 
+    // Sauvegarder en base si données suffisantes
+    if (confidence > 0.2) {
+      try {
+        const origin = req.headers.get("host") || ""
+        const protocol = origin.includes("localhost") ? "http" : "https"
+        await fetch(`${protocol}://${origin}/api/listings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, source, data, confidence }),
+        })
+      } catch {
+        // Silencieux si DB indisponible
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: { source, url, confidence, data },
@@ -145,4 +160,3 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({ message: "POST /api/import avec { url: '...' }" })
 }
-
