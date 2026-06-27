@@ -25,16 +25,20 @@ function extractNumber(text: string, regex: RegExp): number | undefined {
 
 function extractListings(markdown: string, source: string): Listing[] {
   const listings: Listing[] = []
-  const lines = markdown.split("\n")
 
-  // Cherche les URLs d'annonces dans le markdown
   const urlRegex = /https?:\/\/(?:www\.)?(?:seloger\.com\/annonces|costes-viager\.com\/acheter\/[^)\s"]+|leboncoin\.fr\/ventes_immobilieres\/[^)\s"]+)/gi
-  const urls = [...new Set(markdown.match(urlRegex) || [])]
+  const urlMatches = markdown.match(urlRegex) || []
+  const urlSet: { [key: string]: boolean } = {}
+  const urls: string[] = []
+  for (const u of urlMatches) {
+    if (!urlSet[u]) { urlSet[u] = true; urls.push(u) }
+  }
 
   for (const url of urls.slice(0, 20)) {
+    const idx = markdown.indexOf(url)
     const context = markdown.slice(
-      Math.max(0, markdown.indexOf(url) - 300),
-      Math.min(markdown.length, markdown.indexOf(url) + 500)
+      Math.max(0, idx - 300),
+      Math.min(markdown.length, idx + 500)
     )
 
     const bouquet = extractNumber(context, /bouquet[^\d]*(\d[\d\s]{2,7})\s*€?/i)
@@ -80,14 +84,12 @@ async function scrapeWithFirecrawl(url: string): Promise<string> {
   return json.data?.markdown || json.markdown || ""
 }
 
-// ─── Filtre annonces ──────────────────────────────────────────────────────
 function passeFiltres(listing: Listing): boolean {
-  // 1. Bouquet < 80 000 € (si connu)
   if (listing.bouquet && listing.bouquet > 80000) return false
-  // 2. Appartement uniquement — exclure maisons
-  if (/\bmaison\b|\bvilla\b|\bpavillon\b/i.test(listing.titre) &&
-      !/\bappart|\bstudio|\bappt?\b/i.test(listing.titre)) return false
-  // 3. URL valide
+  if (
+    /\bmaison\b|\bvilla\b|\bpavillon\b/i.test(listing.titre) &&
+    !/\bappart|\bstudio|\bappt?\b/i.test(listing.titre)
+  ) return false
   if (!listing.url || listing.url.length < 20) return false
   return true
 }
@@ -97,7 +99,6 @@ export async function GET(req: NextRequest) {
   const bouquetMax = parseInt(searchParams.get("bouquetMax") || "80000")
 
   try {
-    // Scraper les pages de listing en parallèle
     const markdowns = await Promise.allSettled(
       FIRECRAWL_URLS.map(url => scrapeWithFirecrawl(url))
     )
@@ -108,19 +109,17 @@ export async function GET(req: NextRequest) {
     markdowns.forEach((result, i) => {
       if (result.status === "fulfilled" && result.value) {
         const listings = extractListings(result.value, sources[i])
-        allListings = [...allListings, ...listings]
+        allListings = allListings.concat(listings)
       }
     })
 
-    // Dédupliquer par URL
-    const seen = new Set<string>()
+    const seen: { [key: string]: boolean } = {}
     const unique = allListings.filter(l => {
-      if (seen.has(l.url)) return false
-      seen.add(l.url)
+      if (seen[l.url]) return false
+      seen[l.url] = true
       return true
     })
 
-    // Appliquer les filtres
     const filtered = unique.filter(l => passeFiltres(l))
 
     return NextResponse.json({
