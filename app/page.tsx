@@ -72,13 +72,27 @@ function computeViager(o: any, libAns: number | null = null) {
   const ventil = o.ventilationCharges ?? 0.33;
   const chargesAnn = (o.chargesCopro || 0) + (o.autresCharges || 0);
   const tf = o.taxeFonciere || 0;
-  const e1 = o.occupant1Age ? getEsp(o.occupant1Age, o.occupant1Sexe || "F") : 0;
-  const e2 = o.occupant2Age ? getEsp(o.occupant2Age, o.occupant2Sexe || "F") : 0;
-  const duree = Math.max(e1, e2);
-  const libActive = libAns !== null && libAns > 0 && libAns < duree;
+
+  // Type de vente : "occupe" | "libre" | "terme"
+  const typeVente: string = o.typeVente || "occupe";
+  const isTerme = typeVente === "terme";
+  const isLibre = typeVente === "libre";
+
+  // Durée
+  let duree: number;
+  if (isTerme) {
+    duree = o.termeMois ? o.termeMois / 12 : (o.termeAns || 15);
+  } else {
+    const e1 = o.occupant1Age ? getEsp(o.occupant1Age, o.occupant1Sexe || "F") : 0;
+    const e2 = o.occupant2Age ? getEsp(o.occupant2Age, o.occupant2Sexe || "F") : 0;
+    duree = Math.max(e1, e2);
+  }
+
+  const libActive = !isTerme && libAns !== null && libAns > 0 && libAns < duree;
   const majRente = o.majorationRenteLiberation ?? 0.30;
   const loyer = (o.loyerMensuelManuel && o.loyerMensuelManuel > 0)
     ? o.loyerMensuelManuel : loyerEst(o.ville, o.superficie);
+  const mensualite = o.rente || o.mensualite || 0;
 
   let rentes = 0, tfTot = 0, chg = 0, loyers = 0;
   const flows: number[] = [-(o.bouquet || 0)];
@@ -93,18 +107,32 @@ function computeViager(o: any, libAns: number | null = null) {
         fOcc = libAns! - Math.floor(libAns!); fLib = frac - fOcc;
       } else { fOcc = 0; fLib = frac; }
     }
-    const r0 = (o.rente || 0) * 12 * Math.pow(1 + inf, y - 1);
-    const renteY = r0 * fOcc + r0 * (1 + majRente) * fLib;
-    rentes += renteY;
-    const tfY = tf * Math.pow(1 + tfTx, y - 1) * frac
-              + tf * 0.15 * Math.pow(1 + tfTx, y - 1) * fLib;
-    tfTot += tfY;
-    const cY = chargesAnn * Math.pow(1 + inf, y - 1);
-    const chgY = cY * ventil * fOcc + cY * fLib;
-    chg += chgY;
-    const loyY = loyer * 12 * Math.pow(1 + inf, y - 1) * fLib;
-    loyers += loyY;
-    flows.push(-renteY - tfY - chgY + loyY);
+
+    if (isTerme) {
+      // Vente à terme : mensualités fixes sans indexation
+      const menY = mensualite * 12 * frac;
+      rentes += menY;
+      flows.push(-menY);
+    } else if (isLibre) {
+      // Viager libre : rente + TF + charges - loyer (cash flow positif possible)
+      const renteY = mensualite * 12 * Math.pow(1 + inf, y - 1) * frac;
+      const tfY = tf * 0.85 * Math.pow(1 + tfTx, y - 1) * frac;
+      const chgY = chargesAnn * Math.pow(1 + inf, y - 1) * frac;
+      const loyY = loyer * 12 * Math.pow(1 + inf, y - 1) * frac;
+      rentes += renteY; tfTot += tfY; chg += chgY; loyers += loyY;
+      flows.push(-renteY - tfY - chgY + loyY);
+    } else {
+      // Viager occupé
+      const r0 = mensualite * 12 * Math.pow(1 + inf, y - 1);
+      const renteY = r0 * fOcc + r0 * (1 + majRente) * fLib;
+      const tfY = tf * Math.pow(1 + tfTx, y - 1) * frac
+                + tf * 0.15 * Math.pow(1 + tfTx, y - 1) * fLib;
+      const cY = chargesAnn * Math.pow(1 + inf, y - 1);
+      const chgY = cY * ventil * fOcc + cY * fLib;
+      const loyY = loyer * 12 * Math.pow(1 + inf, y - 1) * fLib;
+      rentes += renteY; tfTot += tfY; chg += chgY; loyers += loyY;
+      flows.push(-renteY - tfY - chgY + loyY);
+    }
   }
 
   const prixBrut = (o.bouquet || 0) + rentes + tfTot + chg;
@@ -112,23 +140,22 @@ function computeViager(o: any, libAns: number | null = null) {
   const vv = o.valeurVenale || 0;
   if (vv > 0 && flows.length > 1) flows[flows.length - 1] += vv;
 
-  // Coût mensuel courant (hors bouquet — capital initial séparé)
-  // TF nette = TF × 85% (TEOM 15% payée par occupant)
+  // Coût mensuel net (hors bouquet)
   const tfNette = tf * 0.85;
-  const dureeOccMois = (libActive ? libAns! : duree) * 12;
-  const coutMensuelOcc = (o.rente || 0) + (tfNette + chargesAnn * ventil) / 12;
+  let coutMensuelOcc: number;
+  if (isTerme) {
+    coutMensuelOcc = mensualite; // mensualité tout compris
+  } else if (isLibre) {
+    coutMensuelOcc = mensualite + (tfNette + chargesAnn) / 12 - loyer;
+  } else {
+    coutMensuelOcc = mensualite + (tfNette + chargesAnn * ventil) / 12;
+  }
 
-
-
-
-  // Post libération: coût mensuel - loyer
   const dureeLibMois = libActive ? (duree - libAns!) * 12 : 0;
   const coutMensuelLib = dureeLibMois > 0
-    ? ((o.rente || 0) * (1 + majRente)) + (tf + chargesAnn) / 12 - loyer
+    ? (mensualite * (1 + majRente)) + (tf + chargesAnn) / 12 - loyer
     : null;
-
-  // Point d'équilibre: à partir de quand loyer > charges post-lib
-  const chargesMensuellesLib = ((o.rente || 0) * (1 + majRente)) + (tf + chargesAnn) / 12;
+  const chargesMensuellesLib = (mensualite * (1 + majRente)) + (tf + chargesAnn) / 12;
   const equilibreAtteint = loyer >= chargesMensuellesLib;
 
   // Score négociabilité
@@ -146,21 +173,17 @@ function computeViager(o: any, libAns: number | null = null) {
   const negoColor = negoScore >= 4 ? C.green : negoScore >= 2 ? C.gold : C.text3;
 
   return {
-    duree, libActive, totalRentes: rentes, tfTotal: tfTot,
-    chgTotal: chg, loyers, loyerMensuelEffectif: loyer,
-    prixBrut, prixNet,
+    duree, typeVente, isTerme, isLibre, libActive,
+    totalRentes: rentes, tfTotal: tfTot, chgTotal: chg, loyers,
+    loyerMensuelEffectif: loyer, prixBrut, prixNet,
     ratio: vv > 0 ? prixNet / vv : null,
     decote: vv > 0 ? (vv - prixNet) / vv : null,
     anneesOcc: libActive ? libAns : duree,
     anneesLib: libActive ? duree - libAns! : 0,
     tri: computeIRR(flows) * 100,
     van: computeNPV(flows, 0.04),
-    flows,
-    coutMensuelOcc,
-    coutMensuelLib,
-    equilibreAtteint,
-    chargesMensuellesLib,
-    ageJours, hasPriceDrop, negoScore, negoLabel, negoColor,
+    flows, coutMensuelOcc, coutMensuelLib, equilibreAtteint,
+    chargesMensuellesLib, ageJours, hasPriceDrop, negoScore, negoLabel, negoColor,
   };
 }
 
@@ -178,9 +201,10 @@ async function importFromAPI(url: string) {
 
 // ─── Seed ─────────────────────────────────────────────────────────────────
 const SEED: any[] = [
-  { id:1, source:"SeLoger", ville:"Paris 15 – Lourmel", superficie:56, valeurVenale:480000, bouquet:249000, rente:1377, occupant1Age:81, occupant1Sexe:"H", taxeFonciere:450, chargesCopro:960, tauxInflation:0.03, tauxCroissanceTF:0.04, datePublication:"2026-04-01", url:"https://www.seloger.com/annonces/achat/appartement/paris-15eme-75/", note:"T2 56m² viager occupé H 81 ans", priceHistory:[{date:"2026-04-01",bouquet:265000,rente:1400},{date:"2026-06-20",bouquet:249000,rente:1377}] },
-  { id:2, source:"Renée Costes", ville:"Toulon", superficie:51, valeurVenale:145000, bouquet:18500, rente:435, occupant1Age:74, occupant1Sexe:"F", taxeFonciere:804, chargesCopro:828, tauxInflation:0.03, tauxCroissanceTF:0.04, datePublication:"2025-12-01", url:"https://www.costes-viager.com/acheter/annonces", note:"Quartier des Lices", priceHistory:[{date:"2025-12-01",bouquet:20000,rente:450},{date:"2026-02-15",bouquet:18500,rente:435}] },
-  { id:3, source:"SeLoger", ville:"Essonne – RER B", superficie:45, valeurVenale:136222, bouquet:70316, rente:750, occupant1Age:79, occupant1Sexe:"H", taxeFonciere:300, chargesCopro:600, tauxInflation:0.03, tauxCroissanceTF:0.04, datePublication:"2026-05-15", url:"https://www.seloger.com/recherche/achat/appartement/viager/ile-de-france/essonne-91/", note:"Décote 36%, 2 pièces pied RER B", priceHistory:[{date:"2026-05-15",bouquet:70316,rente:750}] },
+  { id: 1, source: "SeLoger", ville: "Paris 15 – Lourmel", typeVente: "occupe", superficie: 56, valeurVenale: 480000, bouquet: 249000, rente: 1377, occupant1Age: 81, occupant1Sexe: "H", taxeFonciere: 450, chargesCopro: 960, tauxInflation: 0.03, tauxCroissanceTF: 0.04, datePublication: "2026-04-01", url: "https://www.seloger.com/annonces/achat/appartement/paris-15eme-75/", note: "T2 56m² viager occupé", priceHistory: [{ date: "2026-04-01", bouquet: 265000, rente: 1400 }, { date: "2026-06-20", bouquet: 249000, rente: 1377 }] },
+  { id: 2, source: "Renée Costes", ville: "Toulon", typeVente: "occupe", superficie: 51, valeurVenale: 145000, bouquet: 18500, rente: 435, occupant1Age: 74, occupant1Sexe: "F", taxeFonciere: 804, chargesCopro: 828, tauxInflation: 0.03, tauxCroissanceTF: 0.04, datePublication: "2025-12-01", url: "https://www.costes-viager.com/acheter/annonces", note: "Quartier des Lices", priceHistory: [{ date: "2025-12-01", bouquet: 20000, rente: 450 }, { date: "2026-02-15", bouquet: 18500, rente: 435 }] },
+  { id: 3, source: "Renée Costes", ville: "Eu (Seine-Maritime)", typeVente: "terme", superficie: 95, valeurVenale: 303800, bouquet: 73800, mensualite: 1278, rente: 1278, termeMois: 180, loyerMensuelManuel: 1750, taxeFonciere: 0, chargesCopro: 0, tauxInflation: 0.03, tauxCroissanceTF: 0.04, datePublication: "2026-06-27", url: "https://www.costes-viager.com/acheter/seine-maritime-76", note: "Vente à terme libre — loyer garanti 1750€/m", priceHistory: [{ date: "2026-06-27", bouquet: 73800, rente: 1278 }] },
+  { id: 4, source: "SeLoger", ville: "Compiègne", typeVente: "occupe", superficie: 75, valeurVenale: 245000, bouquet: 70825, rente: 402, occupant1Age: 76, occupant1Sexe: "H", taxeFonciere: 648, chargesCopro: 1680, tauxInflation: 0.03, tauxCroissanceTF: 0.04, datePublication: "2026-05-15", url: "https://www.seloger.com", note: "Ratio 60% — Excellent", priceHistory: [{ date: "2026-05-15", bouquet: 70825, rente: 402 }] },
 ];
 
 // ─── Formatters ───────────────────────────────────────────────────────────
@@ -189,7 +213,7 @@ const fmtPct = (n: any) => n != null ? (n * 100).toFixed(1) + "%" : "—";
 const fmtYrs = (n: any) => n != null ? n.toFixed(1) + " ans" : "—";
 const fmtTRI = (n: any) => (n != null && isFinite(n)) ? n.toFixed(2) + "%" : "—";
 const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-const fmtAge = (days: number) => days === 0 ? "Aujourd'hui" : days < 30 ? `${days}j` : days < 365 ? `${Math.floor(days/30)}m` : `${Math.floor(days/365)}a`;
+const fmtAge = (days: number) => days === 0 ? "Auj." : days < 30 ? `${days}j` : days < 365 ? `${Math.floor(days / 30)}m` : `${Math.floor(days / 365)}a`;
 
 const scoreColor = (r: any) => r === null ? C.text3 : r < 0.70 ? C.green : r < 0.85 ? C.gold : r < 1.0 ? C.red : "#7f1d1d";
 const scoreLabel = (r: any) => r === null ? "N/A" : r < 0.70 ? "Excellent" : r < 0.85 ? "Intéressant" : r < 1.0 ? "Limite" : "Défavorable";
@@ -373,7 +397,7 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
                 <div style={{ fontSize: 36, fontWeight: 900, color: C.red, marginBottom: 4 }}>
                   -{fmt(Math.round(resBase.coutMensuelOcc))}<span style={{ fontSize: 14, fontWeight: 400, color: C.text3 }}>/mois</span>
                 </div>
-                <div style={{ fontSize: 11, color: C.text3, marginBottom: 12 }}>Rente + TF + charges acquéreur — hors bouquet</div>
+                <div style={{ fontSize: 11, color: C.text3, marginBottom: 12 }}>Coût mensuel courant (rente + TF nette + charges)</div>
                 <div style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}25`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: 10, color: C.text2, fontWeight: 600 }}>Bouquet — capital initial versé en une fois</div>
@@ -484,23 +508,37 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
 
               {/* Comparaison côte à côte */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-                  { label: "Occupé à vie", result: resBase, color: scoreColor(resBase.ratio), active: true },
-                  { label: libEnabled ? `Libéré an ${libAns}` : "Scénario libération", result: resLib || resBase, color: resLib ? scoreColor(resLib.ratio) : C.border2, active: !!resLib },
-                ].map(({ label, result, color, active }) => (
-                  <div key={label} style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${active ? color + "40" : C.border}`, opacity: active ? 1 : 0.4 }}>
-                    <div style={{ fontSize: 10, color: C.text3, marginBottom: 8, textTransform: "uppercase" }}>{label}</div>
-                    <div style={{ fontSize: 26, fontWeight: 900, color }}>{fmtPct(result.ratio)}</div>
-                    <div style={{ fontSize: 11, color: C.text3, marginTop: 4 }}>{fmt(result.prixNet)}</div>
-                    <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>-{fmt(Math.round(result.coutMensuelOcc))}/m</div>
-                    <div style={{ fontSize: 11, color: C.blue, marginTop: 2 }}>TRI {fmtTRI(result.tri)}</div>
-                    {resLib && label.includes("Libéré") && (
-                      <div style={{ fontSize: 11, marginTop: 6, fontWeight: 700, color: resLib.ratio < resBase.ratio ? C.green : C.red }}>
-                        {resLib.ratio < resBase.ratio ? "▲ Meilleur ratio" : "▼ Ratio moins bon"}
-                      </div>
-                    )}
+                {/* Occupé à vie */}
+                <div style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${scoreColor(resBase.ratio)}40` }}>
+                  <div style={{ fontSize: 10, color: C.text3, marginBottom: 6, textTransform: "uppercase" }}>Occupé à vie</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: scoreColor(resBase.ratio) }}>{fmtPct(resBase.ratio)}</div>
+                  <div style={{ fontSize: 10, color: C.text3, marginTop: 8 }}>Coût mensuel</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: C.red }}>-{fmt(Math.round(resBase.coutMensuelOcc))}/m</div>
+                  <div style={{ fontSize: 10, color: C.blue, marginTop: 4 }}>TRI {fmtTRI(resBase.tri)}</div>
+                </div>
+                {/* Libéré */}
+                <div style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${resLib ? scoreColor(resLib.ratio) + "40" : C.border}`, opacity: resLib ? 1 : 0.4 }}>
+                  <div style={{ fontSize: 10, color: C.orange, marginBottom: 6, textTransform: "uppercase" }}>
+                    {libEnabled ? `Libéré an ${libAns}` : "Scénario libération"}
                   </div>
-                ))}
+                  {resLib ? (
+                    <>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: scoreColor(resLib.ratio) }}>{fmtPct(resLib.ratio)}</div>
+                      <div style={{ fontSize: 10, color: C.text3, marginTop: 8 }}>Cash flow post-lib.</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: resLib.coutMensuelLib !== null && resLib.coutMensuelLib < 0 ? C.green : C.red }}>
+                        {resLib.coutMensuelLib !== null
+                          ? (resLib.coutMensuelLib < 0 ? "+" : "-") + fmt(Math.abs(Math.round(resLib.coutMensuelLib!)))
+                          : "—"}/m
+                      </div>
+                      <div style={{ fontSize: 9, color: C.text3, marginTop: 2 }}>rente+TF+chg-loyer</div>
+                      <div style={{ fontSize: 10, fontWeight: 700, marginTop: 4, color: resLib.ratio < resBase.ratio ? C.green : C.red }}>
+                        {resLib.ratio < resBase.ratio ? "▲ Meilleur" : "▼ Moins bon"}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11, color: C.text3, marginTop: 12 }}>Active le curseur</div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -743,6 +781,8 @@ function Card({ offre, result, onDetail, onDelete }: any) {
             <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{offre.ville || "Ville inconnue"}</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: 10, color: offre.source === "Renée Costes" ? C.gold : C.orange }}>{offre.source}</span>
+              {offre.typeVente === "terme" && <Badge color={C.blue}>À terme</Badge>}
+              {offre.typeVente === "libre" && <Badge color={C.yellow}>Libre</Badge>}
               {ageJours > 0 && <span style={{ fontSize: 10, color: C.text3 }}>· {fmtAge(ageJours)}</span>}
               {hasPriceDrop && <Badge color={C.green}>↓ Prix</Badge>}
               {negoScore >= 2 && <Badge color={negoColor}>{negoLabel}</Badge>}
@@ -757,9 +797,9 @@ function Card({ offre, result, onDetail, onDelete }: any) {
         {/* Métriques principales */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <div style={{ background: C.surface, borderRadius: 10, padding: "10px 12px", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Charges / mois</div>
+            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Coût / mois</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>-{fmt(Math.round(coutMensuelOcc))}</div>
-            <div style={{ fontSize: 9, color: C.text3 }}>hors bouquet {fmt(offre.bouquet)}</div>
+            <div style={{ fontSize: 9, color: C.text3 }}>rente + TF + charges</div>
           </div>
           <div style={{ background: C.surface, borderRadius: 10, padding: "10px 12px", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Prix revient</div>
@@ -770,16 +810,25 @@ function Card({ offre, result, onDetail, onDelete }: any) {
 
         {/* Secondaires */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 12 }}>
-          {[
-            ["Bouquet", fmt(offre.bouquet)],
-            ["Rente", offre.rente ? fmt(offre.rente) + "/m" : "—"],
-            ["Durée", fmtYrs(duree)],
-          ].map(([k, v]) => (
-            <div key={k as string} style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
-              <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>{k}</div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{v}</div>
+          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Bouquet</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{fmt(offre.bouquet)}</div>
+          </div>
+          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>{offre.typeVente === "terme" ? "Mensualité" : "Rente"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{(offre.rente || offre.mensualite) ? fmt(offre.rente || offre.mensualite) + "/m" : "—"}</div>
+          </div>
+          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Durée</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>
+              {fmtYrs(duree)}
+              {offre.occupant1Age && (
+                <span style={{ fontSize: 9, marginLeft: 3, color: offre.occupant1Sexe === "H" && !offre.occupant2Age ? "#60a5fa" : offre.occupant1Sexe === "F" && !offre.occupant2Age ? "#f9a8d4" : C.text3 }}>
+                  ({offre.occupant1Age}a{offre.occupant2Age ? `/${offre.occupant2Age}a` : ""})
+                </span>
+              )}
             </div>
-          ))}
+          </div>
         </div>
 
         {/* Actions */}
@@ -815,6 +864,8 @@ export default function ViagerScan() {
   const [mobile, setMobile] = useState(false);
   const [dbLoaded, setDbLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [showHypo, setShowHypo] = useState(false);
+  const [hypo, setHypo] = useState({ inflation: 3, croissanceTF: 4, appreciationBien: 0 });
 
   useEffect(() => {
     const check = () => setMobile(window.innerWidth < 768);
@@ -904,7 +955,15 @@ export default function ViagerScan() {
     setSyncing(false);
   };
 
-  const computed = useMemo(() => offres.map(o => ({ offre: o, result: computeViager(o) })), [offres]);
+  const computed = useMemo(() => offres.map(o => ({
+    offre: o,
+    result: computeViager({
+      ...o,
+      tauxInflation: hypo.inflation / 100,
+      tauxCroissanceTF: hypo.croissanceTF / 100,
+      valeurVenale: o.valeurVenale ? Math.round(o.valeurVenale * Math.pow(1 + hypo.appreciationBien / 100, o.occupant1Age ? (computeViager(o).duree || 10) : 10)) : o.valeurVenale,
+    })
+  })), [offres, hypo]);
 
   const sorted = useMemo(() => {
     let list = [...computed];
@@ -973,6 +1032,35 @@ export default function ViagerScan() {
               <div style={{ fontSize: 9, color: C.text3, marginTop: 3 }}>{s.sub}</div>
             </div>
           ))}
+        </div>
+
+        {/* Hypothèses */}
+        <div style={{ marginBottom: 14 }}>
+          <button onClick={() => setShowHypo(p => !p)}
+            style={{ background: showHypo ? `${C.orange}20` : C.card, color: showHypo ? C.orange : C.text3, border: `1px solid ${showHypo ? C.orange + "40" : C.border}`, borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+            ⚙️ Hypothèses {showHypo ? "▲" : "▼"}
+          </button>
+          {showHypo && (
+            <div style={{ background: C.card, borderRadius: 12, padding: 16, marginTop: 8, border: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(3,1fr)", gap: 14 }}>
+              {[
+                { label: "Inflation", key: "inflation", unit: "%/an", min: 0, max: 10, step: 0.5, hint: "Impact rentes & charges" },
+                { label: "Rééval. TF", key: "croissanceTF", unit: "%/an", min: 0, max: 10, step: 0.5, hint: "Croissance taxe foncière" },
+                { label: "Appréciation bien", key: "appreciationBien", unit: "%/an", min: -5, max: 15, step: 0.5, hint: "Impact valeur vénale finale" },
+              ].map(h => (
+                <div key={h.key}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, color: C.text2, fontWeight: 600 }}>{h.label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.orange }}>{(hypo as any)[h.key]}{h.unit}</div>
+                  </div>
+                  <input type="range" min={h.min} max={h.max} step={h.step}
+                    value={(hypo as any)[h.key]}
+                    onChange={e => setHypo(p => ({ ...p, [h.key]: +e.target.value }))}
+                    style={{ width: "100%", accentColor: C.orange }} />
+                  <div style={{ fontSize: 9, color: C.text3, marginTop: 2 }}>{h.hint}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Controls */}
