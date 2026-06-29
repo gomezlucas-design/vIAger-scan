@@ -1,32 +1,89 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const REGIONS_CP = new Set([
-  "75","77","78","91","92","93","94","95", // IDF
-  "02","59","60","62","80",                // HDF
-  "04","05","06","13","83","84",           // PACA
-  "09","11","12","30","31","32","34","46","48","65","66","81","82", // Occitanie
-  "14","27","50","61","76",               // Normandie
+  "75","77","78","91","92","93","94","95",
+  "02","59","60","62","80",
+  "04","05","06","13","83","84",
+  "09","11","12","30","31","32","34","46","48","65","66","81","82",
+  "14","27","50","61","76",
 ])
 
-async function getReneeCostesURLs(): Promise<string[]> {
-  const res = await fetch("https://www.costes-viager.com/sitemap.xml", {
-    headers: { "User-Agent": "Mozilla/5.0" }
-  })
-  if (!res.ok) return []
-  const xml = await res.text()
-  
-  const urls = xml.match(/https:\/\/www\.costes-viager\.com\/acheter\/[^\s<"]+/g) || []
-  
-  return urls.filter(url => {
-    // Garder uniquement les annonces individuelles (pas les pages de listing)
-    const parts = url.split("/")
-    if (parts.length < 6) return false
-    // Extraire le département depuis l'URL: /acheter/paris-75/...
-    const deptMatch = url.match(/\/acheter\/[^/]+-(\d{2,3})\//)
-    if (!deptMatch) return true // garder si pas de dept dans URL
-    const cp = deptMatch[1].slice(0, 2)
-    return REGIONS_CP.has(cp)
-  })
+// Sitemaps XML — les plus fiables
+const SITEMAPS = [
+  {
+    url: "https://www.costes-viager.com/sitemap.xml",
+    name: "Renée Costes",
+    pattern: /https:\/\/www\.costes-viager\.com\/acheter\/[^\s<"]+/g,
+  },
+  {
+    url: "https://www.univers-viager.fr/sitemap.xml",
+    name: "Univers Viager",
+    pattern: /https:\/\/www\.univers-viager\.fr\/bien\/[^\s<"]+/g,
+  },
+]
+
+// Pages LeBonCoin des agences spécialisées viager
+const LEBONCOIN_PAGES = [
+  // Sérénité Viager (PACA — bouquets souvent < 80k)
+  "https://www.leboncoin.fr/boutique/107418/serenite_viager_specialiste_nue_propriete_viager.htm",
+  // Recherche viager appartement par région
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_11",  // IDF
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_93",  // PACA
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_32",  // Normandie
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_32",  // HDF
+  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_76",  // Occitanie
+]
+
+function isZoneAutorisee(url: string): boolean {
+  const deptMatch = url.match(/[-\/](\d{2,3})[\/\-_]/)
+  if (!deptMatch) return true
+  return REGIONS_CP.has(deptMatch[1].slice(0, 2))
+}
+
+async function fetchSitemap(sitemapUrl: string, pattern: RegExp): Promise<string[]> {
+  try {
+    const res = await fetch(sitemapUrl, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    })
+    if (!res.ok) return []
+    const xml = await res.text()
+    const matches = xml.match(pattern) || []
+    return [...new Set(matches)].filter(u => {
+      if (u.includes("?")) return false
+      const parts = u.split("/")
+      if (parts.length < 5) return false
+      return true
+    })
+  } catch {
+    return []
+  }
+}
+
+async function scrapePageForURLs(pageUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        url: pageUrl,
+        formats: ["markdown"],
+        onlyMainContent: true,
+        waitFor: 3000,
+      }),
+    })
+    if (!res.ok) return []
+    const json = await res.json()
+    const markdown = json.data?.markdown || json.markdown || ""
+
+    // Extraire URLs d'annonces individuelles
+    const urlMatches = markdown.match(/https?:\/\/(?:www\.)?(?:leboncoin\.fr\/ventes_immobilieres|costes-viager\.com\/acheter|univers-viager\.fr\/bien)\/[^\s"'<>)]+/g) || []
+    return [...new Set(urlMatches.map((u: string) => u.replace(/[,.)>]+$/, "").trim()))].filter((u: string) => u.length > 30)
+  } catch {
+    return []
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -34,51 +91,73 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(searchParams.get("limit") || "50")
   const origin = req.headers.get("host") || ""
   const protocol = origin.includes("localhost") ? "http" : "https"
+  const apiKey = process.env.FIRECRAWL_API_KEY || ""
 
   try {
-    // 1. Récupérer les URLs depuis le sitemap
-    const allUrls = await getReneeCostesURLs()
-    
-    // 2. Récupérer les URLs déjà en base pour éviter doublons
+    // 1. Récupérer les URLs existantes en base
     const existingRes = await fetch(`${protocol}://${origin}/api/listings?limit=500`)
     const existingJson = await existingRes.json()
     const existingUrls = new Set((existingJson.listings || []).map((l: any) => l.url))
-    
-    // 3. Nouvelles URLs seulement
-    const newUrls = allUrls.filter(u => !existingUrls.has(u)).slice(0, limit)
-    
-    if (newUrls.length === 0) {
+
+    let allUrls: string[] = []
+
+    // 2. Sitemaps XML (Renée Costes + Univers Viager)
+    for (const sitemap of SITEMAPS) {
+      const urls = await fetchSitemap(sitemap.url, sitemap.pattern)
+      allUrls = allUrls.concat(urls.filter(u => isZoneAutorisee(u)))
+    }
+
+    // 3. Pages LeBonCoin via Firecrawl
+    if (apiKey) {
+      for (const page of LEBONCOIN_PAGES.slice(0, 3)) {
+        const urls = await scrapePageForURLs(page, apiKey)
+        allUrls = allUrls.concat(urls)
+      }
+    }
+
+    // 4. Dédupliquer et filtrer nouveaux
+    const uniqueNew = [...new Set(allUrls)].filter(u => !existingUrls.has(u))
+
+    if (uniqueNew.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "Aucune nouvelle annonce",
-        total: allUrls.length,
+        message: "Aucune nouvelle annonce trouvée",
+        checked: allUrls.length,
         new: 0,
       })
     }
 
-    // 4. Importer chaque URL (avec Firecrawl pour extraire les données)
+    // 5. Importer via /api/import (Firecrawl + filtres)
     let imported = 0
-    const errors: string[] = []
+    let rejected = 0
+    const reasons: Record<string, number> = {}
 
-    for (const url of newUrls) {
+    for (const url of uniqueNew.slice(0, limit)) {
       try {
         const r = await fetch(`${protocol}://${origin}/api/import`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url }),
         })
-        if (r.ok) imported++
-      } catch (e: any) {
-        errors.push(url)
-      }
+        const json = await r.json()
+        if (json.data?.rejected) {
+          rejected++
+          const reason = json.data.rejected
+          reasons[reason] = (reasons[reason] || 0) + 1
+        } else if (r.ok) {
+          imported++
+        }
+      } catch { }
     }
 
     return NextResponse.json({
       success: true,
-      total: allUrls.length,
-      new: newUrls.length,
+      sources: SITEMAPS.map(s => s.name).concat(["LeBonCoin"]),
+      checked: allUrls.length,
+      new: uniqueNew.length,
       imported,
-      errors: errors.length,
+      rejected,
+      rejectedReasons: reasons,
     })
 
   } catch (e: any) {
