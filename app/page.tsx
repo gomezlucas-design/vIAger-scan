@@ -1,25 +1,27 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
 
-// ─── DESIGN SYSTEM ────────────────────────────────────────────────────────
+// ─── DESIGN SYSTEM V4 — Clair & Premium ──────────────────────────────────
 const C = {
-  bg:       "#0D0D0D",
-  surface:  "#141414",
-  card:     "#1A1A1A",
-  border:   "#2A2A2A",
-  border2:  "#333333",
-  orange:   "#FF6B35",
-  orange2:  "#FF8C5A",
-  orangeD:  "#CC4A1A",
-  gold:     "#F5A623",
-  blue:     "#4A9EFF",
-  green:    "#34D399",
-  red:      "#F87171",
-  yellow:   "#FCD34D",
-  text:     "#F0F0F0",
-  text2:    "#A0A0A0",
-  text3:    "#606060",
+  bg:       "#F7F6F3",   // Blanc cassé chaud
+  surface:  "#FFFFFF",   // Blanc pur
+  card:     "#FFFFFF",   // Cards blanches
+  border:   "#E8E5E0",   // Bordure très légère
+  border2:  "#D4D0C8",   // Bordure secondaire
+  orange:   "#E85D26",   // Orange signature — chaleureux et lisible
+  orange2:  "#F07840",   // Orange clair
+  orangeD:  "#C44A1A",   // Orange foncé hover
+  gold:     "#D4820A",   // Or sobre
+  blue:     "#1A6EBD",   // Bleu professionnel
+  green:    "#1A7A4A",   // Vert finance
+  red:      "#C0392B",   // Rouge alerte
+  yellow:   "#B8860B",   // Jaune doré sobre
+  text:     "#1A1A1A",   // Noir doux
+  text2:    "#5A5A5A",   // Gris moyen
+  text3:    "#9A9A9A",   // Gris clair
   white:    "#FFFFFF",
+  shadow:   "0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.06)",
+  shadowHover: "0 4px 16px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.08)",
 };
 
 const isMobile = () => typeof window !== "undefined" && window.innerWidth < 768;
@@ -778,16 +780,16 @@ function getVilleLabel(offre: any): string {
   return ville;
 }
 
-function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
+function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori }: any) {
   const { prixNet, ratio, duree, coutMensuelOcc, negoLabel, negoColor, negoScore, hasPriceDrop, ageJours } = result;
   const col = scoreColor(ratio);
   const villeLabel = getVilleLabel(offre);
   const pubDate = offre.datePublication || offre.createdAt;
 
   return (
-    <div style={{ background: C.card, borderRadius: 16, overflow: "hidden", border: `1px solid ${isFavori ? C.gold + "60" : C.border}`, cursor: "pointer", transition: "all .18s" }}
-      onMouseEnter={e => { (e.currentTarget as any).style.borderColor = isFavori ? C.gold : C.orange + "60"; (e.currentTarget as any).style.transform = "translateY(-2px)"; }}
-      onMouseLeave={e => { (e.currentTarget as any).style.borderColor = isFavori ? C.gold + "60" : C.border; (e.currentTarget as any).style.transform = "translateY(0)"; }}
+    <div style={{ background: C.surface, borderRadius: 12, overflow: "hidden", border: `1px solid ${isFavori ? C.gold + "80" : C.border}`, cursor: "pointer", transition: "all .2s", boxShadow: C.shadow }}
+      onMouseEnter={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadowHover; el.style.borderColor = isFavori ? C.gold : C.orange + "60"; el.style.transform = "translateY(-2px)"; }}
+      onMouseLeave={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadow; el.style.borderColor = isFavori ? C.gold + "80" : C.border; el.style.transform = "translateY(0)"; }}
       onClick={() => onDetail(offre)}>
 
       <div style={{ height: 2, background: `linear-gradient(90deg, ${col}, ${col}44)` }} />
@@ -822,12 +824,12 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
 
         {/* Métriques principales */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <div style={{ background: C.surface, borderRadius: 10, padding: "10px 12px", border: `1px solid ${C.border}` }}>
+          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Coût / mois</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>-{fmt(Math.round(coutMensuelOcc))}</div>
             <div style={{ fontSize: 9, color: C.text3 }}>rente + TF + charges</div>
           </div>
-          <div style={{ background: C.surface, borderRadius: 10, padding: "10px 12px", border: `1px solid ${C.border}` }}>
+          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Prix revient</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: col }}>{fmt(prixNet)}</div>
             <div style={{ fontSize: 9, color: C.text3 }}>sur {fmtYrs(duree)}</div>
@@ -836,15 +838,15 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
 
         {/* Secondaires */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
-          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
             <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Bouquet</div>
             <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{fmt(offre.bouquet)}</div>
           </div>
-          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
             <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>{offre.typeVente === "terme" ? "Mensualité" : "Rente"}</div>
             <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{(offre.rente || offre.mensualite) ? fmt(offre.rente || offre.mensualite) + "/m" : "—"}</div>
           </div>
-          <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
             <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Durée</div>
             <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>
               {fmtYrs(duree)}
@@ -873,9 +875,14 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
               🔗
             </a>
           )}
+          <button onClick={e => { e.stopPropagation(); onSignal(offre); }}
+            title="Signaler une anomalie"
+            style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+            ?
+          </button>
           <button onClick={e => { e.stopPropagation(); onRejeter(offre.id); }}
             title="Rejeter"
-            style={{ background: C.surface, color: C.red, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer" }}>
+            style={{ background: C.bg, color: C.red, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer" }}>
             ✕
           </button>
         </div>
@@ -885,6 +892,81 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────
+function SignalModal({ offre, onClose }: { offre: any; onClose: () => void }) {
+  const [note, setNote] = useState("");
+  const [field, setField] = useState("bouquet");
+  const [sent, setSent] = useState(false);
+
+  const fields = [
+    ["bouquet", "Bouquet trop élevé / trop bas"],
+    ["rente", "Rente incorrecte"],
+    ["valeurVenale", "Valeur vénale erronée"],
+    ["taxeFonciere", "Taxe foncière incorrecte"],
+    ["chargesCopro", "Charges copro incorrectes"],
+    ["occupant1Age", "Âge occupant incorrect"],
+    ["superficie", "Superficie incorrecte"],
+    ["typeVente", "Type de vente incorrect"],
+    ["autre", "Autre problème"],
+  ];
+
+  const send = () => {
+    // Sauvegarde locale du signal (pourrait être envoyé à une API)
+    const signals = JSON.parse(sessionStorage.getItem("viager_signals") || "[]");
+    signals.push({ url: offre.url, ville: offre.ville, field, note, date: new Date().toISOString() });
+    sessionStorage.setItem("viager_signals", JSON.stringify(signals));
+    setSent(true);
+    setTimeout(onClose, 1500);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }} onClick={onClose}>
+      <div style={{ background: C.surface, borderRadius: 16, width: "min(95vw,480px)", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,.2)" }} onClick={e => e.stopPropagation()}>
+        {sent ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Signalement enregistré</div>
+            <div style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>Merci pour la correction</div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>Signaler une anomalie</div>
+                <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>{offre.ville} — {offre.source}</div>
+              </div>
+              <button onClick={onClose} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: C.text3 }}>✕</button>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, color: C.text2, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: ".05em" }}>Champ concerné</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {fields.map(([f, l]) => (
+                  <button key={f} onClick={() => setField(f)}
+                    style={{ background: field === f ? `${C.orange}12` : C.bg, color: field === f ? C.orange : C.text2, border: `1px solid ${field === f ? C.orange + "40" : C.border}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 12, textAlign: "left", fontWeight: field === f ? 600 : 400 }}>
+                    {field === f ? "● " : "○ "}{l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: C.text2, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".05em" }}>Note (optionnel)</div>
+              <textarea value={note} onChange={e => setNote(e.target.value)}
+                placeholder="Ex: le bouquet affiché est 74 000€ mais devrait être 48 000€..."
+                style={{ width: "100%", minHeight: 70, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: C.text, resize: "none", fontFamily: "inherit" }} />
+            </div>
+
+            <button onClick={send}
+              style={{ width: "100%", background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+              Envoyer le signalement
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ViagerScan() {
   const [offres, setOffres] = useState<any[]>(SEED);
   const [sortBy, setSortBy] = useState("ratio");
@@ -895,6 +977,8 @@ export default function ViagerScan() {
   const [mobile, setMobile] = useState(false);
   const [dbLoaded, setDbLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [signal, setSignal] = useState<{offre: any, field?: string} | null>(null);
+  const [signalNote, setSignalNote] = useState("");
   const [showHypo, setShowHypo] = useState(false);
   const [hypo, setHypo] = useState({ inflation: 3, croissanceTF: 4, appreciationBien: 0 });
   const [favoris, setFavoris] = useState<Set<any>>(new Set());
@@ -1048,26 +1132,26 @@ export default function ViagerScan() {
   const negoCount = computed.filter(x => x.result.negoScore >= 2).length;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, 'SF Pro Display', 'Inter', system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, 'SF Pro Text', 'Inter', system-ui, sans-serif" } as any}>
 
       {/* Header sticky */}
-      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: `0 ${mobile ? 14 : 24}px`, position: "sticky", top: 0, zIndex: 50, backdropFilter: "blur(10px)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
+      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: `0 ${mobile ? 14 : 24}px`, position: "sticky", top: 0, zIndex: 50, boxShadow: "0 1px 0 rgba(0,0,0,.06)" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 54 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 28, height: 28, background: `linear-gradient(135deg, ${C.orange}, ${C.orangeD})`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🏠</div>
+            <div style={{ width: 30, height: 30, background: C.orange, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, boxShadow: "0 2px 6px rgba(232,93,38,.25)" }}>🏠</div>
             <div>
-              <span style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-.03em", color: C.text }}>viager</span>
-              <span style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-.03em", color: C.orange }}>scan</span>
+              <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-.04em", color: C.text }}>viager</span>
+              <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-.04em", color: C.orange }}>scan</span>
             </div>
-            <span style={{ fontSize: 9, color: C.text3, background: C.card, padding: "2px 7px", borderRadius: 20, border: `1px solid ${C.border}`, fontWeight: 600 }}>BETA</span>
+            <span style={{ fontSize: 9, color: C.text3, background: C.bg, padding: "2px 7px", borderRadius: 20, border: `1px solid ${C.border}`, fontWeight: 700, letterSpacing: ".04em" }}>BETA</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={syncNow} disabled={syncing}
-              style={{ background: C.card, color: syncing ? C.text3 : C.green, border: `1px solid ${C.green}40`, borderRadius: 10, padding: "9px 14px", cursor: syncing ? "wait" : "pointer", fontSize: 12, fontWeight: 700 }}>
+              style={{ background: C.bg, color: syncing ? C.text3 : C.green, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", cursor: syncing ? "wait" : "pointer", fontSize: 12, fontWeight: 600 }}>
               {syncing ? "⏳" : "⟳"}{mobile ? "" : syncing ? " Sync…" : " Sync"}
             </button>
             <button onClick={() => setShowImport(true)}
-              style={{ background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: mobile ? "8px 16px" : "9px 20px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+              style={{ background: C.orange, color: C.white, border: "none", borderRadius: 8, padding: mobile ? "8px 16px" : "8px 20px", cursor: "pointer", fontSize: 13, fontWeight: 700, boxShadow: "0 2px 6px rgba(232,93,38,.25)" }}>
               {mobile ? "+ Importer" : "+ Importer une annonce"}
             </button>
           </div>
@@ -1084,9 +1168,9 @@ export default function ViagerScan() {
             { label: "Coût moyen", value: avgCout ? `-${fmt(Math.round(avgCout))}/m` : "—", color: C.red, sub: "Cash flow mensuel" },
             { label: "Négociables", value: negoCount, color: C.green, sub: `sur ${offres.length} annonces` },
           ].map(s => (
-            <div key={s.label} style={{ background: C.card, borderRadius: 12, padding: "14px 16px", border: `1px solid ${C.border}`, borderLeft: `2px solid ${s.color}` }}>
-              <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", letterSpacing: ".07em", marginBottom: 6 }}>{s.label}</div>
-              <div style={{ fontSize: mobile ? 18 : 22, fontWeight: 900, color: s.color }}>{s.value}</div>
+            <div key={s.label} style={{ background: C.surface, borderRadius: 10, padding: "14px 16px", border: `1px solid ${C.border}`, borderTop: `3px solid ${s.color}`, boxShadow: C.shadow }}>
+              <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>{s.label}</div>
+              <div style={{ fontSize: mobile ? 20 : 24, fontWeight: 800, color: s.color, letterSpacing: "-.02em" }}>{s.value}</div>
               <div style={{ fontSize: 9, color: C.text3, marginTop: 3 }}>{s.sub}</div>
             </div>
           ))}
@@ -1186,7 +1270,7 @@ export default function ViagerScan() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
             {sorted.map(({ offre, result }) => (
-              <Card key={offre.id} offre={offre} result={result} onDetail={setDetail} onFavori={toggleFavori} onRejeter={toggleRejete} isFavori={favoris.has(offre.id)} />
+              <Card key={offre.id} offre={offre} result={result} onDetail={setDetail} onFavori={toggleFavori} onRejeter={toggleRejete} onSignal={(o: any) => setSignal({offre: o})} isFavori={favoris.has(offre.id)} />
             ))}
           </div>
         )}
@@ -1202,6 +1286,7 @@ export default function ViagerScan() {
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={addOffre} />}
       {detail && <DetailPanel offre={detail} onClose={() => setDetail(null)} />}
+      {signal && <SignalModal offre={signal.offre} onClose={() => setSignal(null)} />}
     </div>
   );
 }
