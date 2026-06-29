@@ -762,33 +762,59 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
 }
 
 // ─── Card ──────────────────────────────────────────────────────────────────
-function Card({ offre, result, onDetail, onDelete }: any) {
+// Extrait dept/région depuis l'URL Renée Costes ou code postal
+function getVilleLabel(offre: any): string {
+  const ville = offre.ville || "Ville inconnue";
+  const cp = offre.codePostal;
+  if (cp) {
+    const dept = cp.slice(0, 2);
+    return `${ville} (${dept})`;
+  }
+  // Extraire depuis URL Renée Costes: /acheter/paris-75/paris-18e...
+  if (offre.url) {
+    const m = offre.url.match(/\/acheter\/[^/]+-(\d{2,3})\//);
+    if (m) return `${ville} (${m[1]})`;
+  }
+  return ville;
+}
+
+function Card({ offre, result, onDetail, onFavori, onRejeter, isFavori }: any) {
   const { prixNet, ratio, duree, coutMensuelOcc, negoLabel, negoColor, negoScore, hasPriceDrop, ageJours } = result;
   const col = scoreColor(ratio);
+  const villeLabel = getVilleLabel(offre);
+  const pubDate = offre.datePublication || offre.createdAt;
 
   return (
-    <div style={{ background: C.card, borderRadius: 16, overflow: "hidden", border: `1px solid ${C.border}`, cursor: "pointer", transition: "all .18s" }}
-      onMouseEnter={e => { (e.currentTarget as any).style.borderColor = C.orange + "60"; (e.currentTarget as any).style.transform = "translateY(-2px)"; }}
-      onMouseLeave={e => { (e.currentTarget as any).style.borderColor = C.border; (e.currentTarget as any).style.transform = "translateY(0)"; }}
+    <div style={{ background: C.card, borderRadius: 16, overflow: "hidden", border: `1px solid ${isFavori ? C.gold + "60" : C.border}`, cursor: "pointer", transition: "all .18s" }}
+      onMouseEnter={e => { (e.currentTarget as any).style.borderColor = isFavori ? C.gold : C.orange + "60"; (e.currentTarget as any).style.transform = "translateY(-2px)"; }}
+      onMouseLeave={e => { (e.currentTarget as any).style.borderColor = isFavori ? C.gold + "60" : C.border; (e.currentTarget as any).style.transform = "translateY(0)"; }}
       onClick={() => onDetail(offre)}>
 
       <div style={{ height: 2, background: `linear-gradient(90deg, ${col}, ${col}44)` }} />
 
       <div style={{ padding: 16 }}>
         {/* Top row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{offre.ville || "Ville inconnue"}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {isFavori && <span style={{ color: C.gold, marginRight: 5 }}>⭐</span>}
+              {villeLabel}
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: 10, color: offre.source === "Renée Costes" ? C.gold : C.orange }}>{offre.source}</span>
               {offre.typeVente === "terme" && <Badge color={C.blue}>À terme</Badge>}
               {offre.typeVente === "libre" && <Badge color={C.yellow}>Libre</Badge>}
-              {ageJours > 0 && <span style={{ fontSize: 10, color: C.text3 }}>· {fmtAge(ageJours)}</span>}
               {hasPriceDrop && <Badge color={C.green}>↓ Prix</Badge>}
               {negoScore >= 2 && <Badge color={negoColor}>{negoLabel}</Badge>}
             </div>
+            {/* Date de publication visible */}
+            {pubDate && (
+              <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>
+                📅 {fmtDate(pubDate)}{ageJours > 0 ? ` · ${fmtAge(ageJours)}` : ""}
+              </div>
+            )}
           </div>
-          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
             <div style={{ fontSize: 24, fontWeight: 900, color: col, lineHeight: 1 }}>{fmtPct(ratio)}</div>
             <div style={{ fontSize: 9, color: col, fontWeight: 700, textTransform: "uppercase", marginTop: 2 }}>{scoreLabel(ratio)}</div>
           </div>
@@ -809,7 +835,7 @@ function Card({ offre, result, onDetail, onDelete }: any) {
         </div>
 
         {/* Secondaires */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
           <div style={{ background: C.surface, borderRadius: 8, padding: "7px 8px" }}>
             <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Bouquet</div>
             <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{fmt(offre.bouquet)}</div>
@@ -832,19 +858,24 @@ function Card({ offre, result, onDetail, onDelete }: any) {
         </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 6 }}>
           <button onClick={e => { e.stopPropagation(); onDetail(offre); }}
             style={{ flex: 1, background: `${C.orange}15`, color: C.orange, border: `1px solid ${C.orange}25`, borderRadius: 10, padding: "9px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            Détail complet
+            Détail
+          </button>
+          <button onClick={e => { e.stopPropagation(); onFavori(offre.id); }}
+            style={{ background: isFavori ? `${C.gold}20` : C.surface, color: isFavori ? C.gold : C.text3, border: `1px solid ${isFavori ? C.gold + "40" : C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 13, cursor: "pointer" }}>
+            ⭐
           </button>
           {offre.url && (
             <a href={offre.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-              style={{ background: C.surface, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 12, fontWeight: 600, textDecoration: "none" }}>
+              style={{ background: C.surface, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, textDecoration: "none" }}>
               🔗
             </a>
           )}
-          <button onClick={e => { e.stopPropagation(); onDelete(offre.id); }}
-            style={{ background: C.surface, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 11, cursor: "pointer" }}>
+          <button onClick={e => { e.stopPropagation(); onRejeter(offre.id); }}
+            title="Rejeter"
+            style={{ background: C.surface, color: C.red, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer" }}>
             ✕
           </button>
         </div>
@@ -866,6 +897,25 @@ export default function ViagerScan() {
   const [syncing, setSyncing] = useState(false);
   const [showHypo, setShowHypo] = useState(false);
   const [hypo, setHypo] = useState({ inflation: 3, croissanceTF: 4, appreciationBien: 0 });
+  const [favoris, setFavoris] = useState<Set<any>>(new Set());
+  const [rejetes, setRejetes] = useState<Set<any>>(new Set());
+  const [anomalies, setAnomalies] = useState<Set<any>>(new Set());
+  const [activeTab, setActiveTab] = useState<"all"|"favoris"|"anomalies">("all");
+
+  const toggleFavori = (id: any) => setFavoris(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleRejete = (id: any) => {
+    setRejetes(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setFavoris(p => { const n = new Set(p); n.delete(id); return n; });
+  };
+
+  // Détection automatique anomalies
+  const isAnomalie = (result: any, offre: any): boolean => {
+    if (result.ratio !== null && (result.ratio > 3 || result.ratio < 0.1)) return true;
+    if (offre.chargesCopro && offre.chargesCopro > 50000) return true;
+    if (offre.occupant1Age && (offre.occupant1Age < 50 || offre.occupant1Age > 100)) return true;
+    if (offre.taxeFonciere && offre.taxeFonciere > 20000) return true;
+    return false;
+  };
 
   useEffect(() => {
     const check = () => setMobile(window.innerWidth < 768);
@@ -955,18 +1005,25 @@ export default function ViagerScan() {
     setSyncing(false);
   };
 
-  const computed = useMemo(() => offres.map(o => ({
-    offre: o,
-    result: computeViager({
-      ...o,
-      tauxInflation: hypo.inflation / 100,
-      tauxCroissanceTF: hypo.croissanceTF / 100,
-      valeurVenale: o.valeurVenale ? Math.round(o.valeurVenale * Math.pow(1 + hypo.appreciationBien / 100, o.occupant1Age ? (computeViager(o).duree || 10) : 10)) : o.valeurVenale,
-    })
-  })), [offres, hypo]);
+  const computed = useMemo(() => offres
+    .filter(o => !rejetes.has(o.id))
+    .map(o => {
+      const result = computeViager({
+        ...o,
+        tauxInflation: hypo.inflation / 100,
+        tauxCroissanceTF: hypo.croissanceTF / 100,
+        valeurVenale: o.valeurVenale ? Math.round(o.valeurVenale * Math.pow(1 + hypo.appreciationBien / 100, o.occupant1Age ? (computeViager(o).duree || 10) : 10)) : o.valeurVenale,
+      });
+      const anomalie = isAnomalie(result, o);
+      if (anomalie) setAnomalies(p => new Set([...Array.from(p), o.id]));
+      return { offre: o, result, anomalie };
+    }), [offres, hypo, rejetes]);
 
   const sorted = useMemo(() => {
     let list = [...computed];
+    if (activeTab === "favoris") list = list.filter(x => favoris.has(x.offre.id));
+    else if (activeTab === "anomalies") list = list.filter(x => anomalies.has(x.offre.id));
+    else list = list.filter(x => !anomalies.has(x.offre.id));
     if (filterSource !== "Tous") list = list.filter(x => x.offre.source === filterSource);
     if (search.trim()) list = list.filter(x => x.offre.ville?.toLowerCase().includes(search.toLowerCase()));
     list.sort((a, b) => {
@@ -974,11 +1031,12 @@ export default function ViagerScan() {
       if (sortBy === "cout") return (a.result.coutMensuelOcc || 0) - (b.result.coutMensuelOcc || 0);
       if (sortBy === "decote") return (b.result.decote ?? -99) - (a.result.decote ?? -99);
       if (sortBy === "bouquet") return (a.offre.bouquet || 0) - (b.offre.bouquet || 0);
+      if (sortBy === "date") return new Date(b.offre.datePublication || b.offre.createdAt || 0).getTime() - new Date(a.offre.datePublication || a.offre.createdAt || 0).getTime();
       if (sortBy === "nego") return b.result.negoScore - a.result.negoScore;
       return 0;
     });
     return list;
-  }, [computed, sortBy, filterSource, search]);
+  }, [computed, sortBy, filterSource, search, activeTab, favoris, anomalies]);
 
   const addOffre = (o: any) => setOffres(p => [...p, { ...o, id: Math.max(0, ...p.map((x: any) => x.id)) + 1 }]);
   const delOffre = (id: number) => setOffres(p => p.filter((o: any) => o.id !== id));
@@ -1034,6 +1092,21 @@ export default function ViagerScan() {
           ))}
         </div>
 
+        {/* Onglets principaux */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {([["all", "📋 Toutes", computed.filter(x => !anomalies.has(x.offre.id)).length],
+             ["favoris", "⭐ Favoris", computed.filter(x => favoris.has(x.offre.id)).length],
+             ["anomalies", "⚠️ Anomalies", anomalies.size]] as [string, string, number][]).map(([tab, label, count]) => (
+            <button key={tab} onClick={() => setActiveTab(tab as any)}
+              style={{ background: activeTab === tab ? (tab === "anomalies" ? C.red : tab === "favoris" ? C.gold : C.orange) + "20" : C.card,
+                color: activeTab === tab ? (tab === "anomalies" ? C.red : tab === "favoris" ? C.gold : C.orange) : C.text3,
+                border: `1px solid ${activeTab === tab ? (tab === "anomalies" ? C.red : tab === "favoris" ? C.gold : C.orange) + "40" : C.border}`,
+                borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 11, fontWeight: activeTab === tab ? 700 : 400 }}>
+              {label} <span style={{ fontSize: 10, opacity: 0.8 }}>({count})</span>
+            </button>
+          ))}
+        </div>
+
         {/* Hypothèses */}
         <div style={{ marginBottom: 14 }}>
           <button onClick={() => setShowHypo(p => !p)}
@@ -1078,8 +1151,8 @@ export default function ViagerScan() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 4, background: C.card, borderRadius: 10, padding: 4, border: `1px solid ${C.border}`, alignSelf: "flex-start" }}>
-            {[["ratio", "Ratio"], ["cout", "Coût/m"], ["decote", "Décote"], ["bouquet", "Bouquet"], ["nego", "Négociables"]].map(([k, l]) => (
+          <div style={{ display: "flex", gap: 4, background: C.card, borderRadius: 10, padding: 4, border: `1px solid ${C.border}`, alignSelf: "flex-start", overflowX: "auto" }}>
+            {[["ratio", "Ratio"], ["cout", "Coût/m"], ["decote", "Décote"], ["bouquet", "Bouquet"], ["date", "Récentes"], ["nego", "Négociables"]].map(([k, l]) => (
               <button key={k} onClick={() => setSortBy(k)}
                 style={{ background: sortBy === k ? C.orange : "none", color: sortBy === k ? C.white : C.text3, border: "none", borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontSize: 11, fontWeight: sortBy === k ? 700 : 400, whiteSpace: "nowrap" }}>
                 {l}
@@ -1113,7 +1186,7 @@ export default function ViagerScan() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
             {sorted.map(({ offre, result }) => (
-              <Card key={offre.id} offre={offre} result={result} onDetail={setDetail} onDelete={delOffre} />
+              <Card key={offre.id} offre={offre} result={result} onDetail={setDetail} onFavori={toggleFavori} onRejeter={toggleRejete} isFavori={favoris.has(offre.id)} />
             ))}
           </div>
         )}
