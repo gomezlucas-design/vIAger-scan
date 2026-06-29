@@ -25,11 +25,10 @@ const LEBONCOIN_PAGES = [
  "https://www.leboncoin.fr/boutique/107418/serenite_viager_specialiste_nue_propriete_viager.htm",
  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_11",
  "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_93",
- "https://www.leboncoin.fr/recherche?category=9&real_estate_type=2&owner_type=pro&project_types=life_annuity&locations=r_32",
 ]
 
 function isZoneAutorisee(url: string): boolean {
- const deptMatch = url.match(/[-\/](\d{2,3})[\/\-_]/)
+ const deptMatch = url.match(/[-/](\d{2,3})[/-_]/)
  if (!deptMatch) return true
  return REGIONS_CP.has(deptMatch[1].slice(0, 2))
 }
@@ -41,11 +40,10 @@ async function fetchSitemap(sitemapUrl: string, pattern: RegExp): Promise<string
    })
    if (!res.ok) return []
    const xml = await res.text()
-   const matches = xml.match(pattern) || []
+   const matches: string[] = xml.match(pattern) || []
    return Array.from(new Set(matches)).filter(u => {
      if (u.includes("?")) return false
-     const parts = u.split("/")
-     if (parts.length < 5) return false
+     if (u.split("/").length < 5) return false
      return true
    })
  } catch {
@@ -70,9 +68,13 @@ async function scrapePageForURLs(pageUrl: string, apiKey: string): Promise<strin
    })
    if (!res.ok) return []
    const json = await res.json()
-   const markdown = json.data?.markdown || json.markdown || ""
-   const urlMatches = markdown.match(/https?:\/\/(?:www\.)?(?:leboncoin\.fr\/ventes_immobilieres|costes-viager\.com\/acheter|univers-viager\.fr\/bien)\/[^\s"'<>)]+/g) || []
-   return Array.from(new Set(urlMatches.map((u: string) => u.replace(/[,.)>]+$/, "").trim()))).filter((u: string) => u.length > 30)
+   const markdown: string = json.data?.markdown || json.markdown || ""
+   const urlMatches: string[] = markdown.match(
+     /https?:\/\/(?:www\.)?(?:leboncoin\.fr\/ventes_immobilieres|costes-viager\.com\/acheter|univers-viager\.fr\/bien)\/[^\s"'<>)]+/g
+   ) || []
+   return Array.from(
+     new Set(urlMatches.map(u => u.replace(/[,.)>]+$/, "").trim()))
+   ).filter(u => u.length > 30)
  } catch {
    return []
  }
@@ -88,7 +90,7 @@ export async function GET(req: NextRequest) {
  try {
    const existingRes = await fetch(`${protocol}://${origin}/api/listings?limit=500`)
    const existingJson = await existingRes.json()
-   const existingUrls = new Set((existingJson.listings || []).map((l: any) => l.url))
+   const existingUrls = new Set((existingJson.listings || []).map((l: any) => l.url as string))
 
    let allUrls: string[] = []
 
@@ -98,7 +100,7 @@ export async function GET(req: NextRequest) {
    }
 
    if (apiKey) {
-     for (const page of LEBONCOIN_PAGES.slice(0, 3)) {
+     for (const page of LEBONCOIN_PAGES.slice(0, 2)) {
        const urls = await scrapePageForURLs(page, apiKey)
        allUrls = allUrls.concat(urls)
      }
@@ -129,7 +131,7 @@ export async function GET(req: NextRequest) {
        const json = await r.json()
        if (json.data?.rejected) {
          rejected++
-         const reason = json.data.rejected
+         const reason: string = json.data.rejected
          reasons[reason] = (reasons[reason] || 0) + 1
        } else if (r.ok) {
          imported++
