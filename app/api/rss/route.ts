@@ -1,187 +1,184 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const requests = new Map<string, number[]>()
-function rateLimit(ip: string): boolean {
-  const now = Date.now()
-  const prev = (requests.get(ip) || []).filter(t => now - t < 60000)
-  if (prev.length >= 15) return false
-  requests.set(ip, [...prev, now])
+interface Listing {
+  url: string
+  titre: string
+  ville?: string
+  codePostal?: string
+  bouquet?: number
+  rente?: number
+  superficie?: number
+  source: string
+  typeViager?: string
+  pubDate?: string
+  idAnnonce?: string
+}
+
+// ─── API XML SeLoger (officielle app mobile) ──────────────────────────────
+// Base: http://ws.seloger.com/search.xml
+// idtt=2 (achat), idtypebien=1 (appartement)
+// natures=1 = viager
+async function fetchSeLogerAPI(page = 1, bouquetMax = 80000): Promise<Listing[]> {
+  const params = new URLSearchParams({
+    idtt: "2",           // achat
+    idtypebien: "1",     // appartement
+    natures: "1",        // viager
+    pxmax: String(bouquetMax),
+    tri: "d_dt_crea",    // plus récents en premier
+    SEARCHpg: String(page),
+  })
+
+  const url = `http://ws.seloger.com/search.xml?${params}`
+
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "SeLoger/4.0 (iPhone; iOS 17.0)",
+      "Accept": "application/xml, text/xml",
+    },
+  })
+
+  if (!res.ok) return []
+  const xml = await res.text()
+  return parseSeLogerXML(xml)
+}
+
+function parseSeLogerXML(xml: string): Listing[] {
+  const listings: Listing[] = []
+  const items = xml.match(/<annonce>[\s\S]*?<\/annonce>/gi) || []
+
+  for (const item of items) {
+    const get = (tag: string) => {
+      const m = item.match(new RegExp(`<${tag}[^>]*>([^<]*)<\/${tag}>`, "i"))
+      return m?.[1]?.trim() || ""
+    }
+    const getNum = (tag: string) => {
+      const v = parseFloat(get(tag).replace(/\s/g, ""))
+      return isNaN(v) ? undefined : v
+    }
+
+    const id = get("idAnnonce")
+    const cp = get("cp") || get("codePostal")
+    const ville = get("ville") || get("libelleLieu")
+    const prix = getNum("prix") || getNum("prixFAI")
+    const surface = getNum("surface")
+    const nbPieces = get("nbPieces")
+    const titre = get("titre") || get("libelle") || `Viager ${ville}`
+    const urlAnnonce = get("permaLien") || get("url") || (id ? `https://www.seloger.com/annonces/achat/appartement/${cp}/${id}.htm` : "")
+    const dateM = get("dtCreation") || get("dateModif")
+
+    // Extraire bouquet et rente depuis le titre ou la description
+    const desc = get("descriptif") + " " + titre
+    const bouquetM = desc.match(/bouquet[^\d]*(\d[\d\s]{2,7})\s*€?/i)
+    const renteM = desc.match(/rente[^\d]*(\d[\d\s]{2,5})\s*€?\s*\/?\s*mois/i)
+
+    const bouquet = bouquetM ? parseInt(bouquetM[1].replace(/\s/g, "")) : prix
+    const rente = renteM ? parseInt(renteM[1].replace(/\s/g, "")) : undefined
+
+    if (!urlAnnonce || urlAnnonce.length < 20) continue
+
+    listings.push({
+      idAnnonce: id,
+      url: urlAnnonce,
+      titre,
+      ville: ville || undefined,
+      codePostal: cp || undefined,
+      bouquet: bouquet && bouquet > 0 && bouquet < 500000 ? bouquet : undefined,
+      rente: rente && rente > 50 && rente < 5000 ? rente : undefined,
+      superficie: surface && surface > 5 && surface < 1000 ? surface : undefined,
+      source: "SeLoger",
+      pubDate: dateM || new Date().toISOString(),
+    })
+  }
+
+  return listings
+}
+
+// ─── Renée Costes sitemap XML ─────────────────────────────────────────────
+async function fetchReneeCostes(): Promise<Listing[]> {
+  const res = await fetch("https://www.costes-viager.com/sitemap.xml", {
+    headers: { "User-Agent": "Mozilla/5.0" },
+  })
+  if (!res.ok) return []
+  const xml = await res.text()
+
+  const urls = xml.match(/https:\/\/www\.costes-viager\.com\/acheter\/[^\s<"]+/g) || []
+  const recent = urls
+    .filter(u => !u.includes("?") && u.split("/").length > 5)
+    .slice(0, 60)
+
+  return recent.map(url => ({
+    url,
+    titre: `Viager Renée Costes`,
+    source: "Renée Costes",
+    pubDate: new Date().toISOString(),
+  }))
+}
+
+// ─── Filtres ──────────────────────────────────────────────────────────────
+function passeFiltres(listing: Listing, bouquetMax: number): boolean {
+  if (!listing.url || listing.url.length < 25) return false
+  if (/\/maison-/i.test(listing.url) && !/\/appartement-/i.test(listing.url)) return false
+  if (listing.bouquet && listing.bouquet > bouquetMax) return false
+  if (listing.rente && listing.rente >= 600) return false
   return true
 }
 
-function detectTypeVente(text: string): "occupe" | "libre" | "terme" {
-  const t = text.toLowerCase()
-  if (/vente\s+[aà]\s+terme|terme\s+libre|terme\s+occup|mensualit[eé]s?\s+\d|180\s*mois|120\s*mois|240\s*mois/.test(t)) return "terme"
-  if (/viager\s+libre|bien\s+libre|libre\s+de\s+toute\s+occupation|vente\s+libre/.test(t)) return "libre"
-  return "occupe"
-}
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const bouquetMax = parseInt(searchParams.get("bouquetMax") || "80000")
+  const origin = req.headers.get("host") || ""
+  const protocol = origin.includes("localhost") ? "http" : "https"
 
-function extractNumber(text: string, regex: RegExp): number | undefined {
-  const m = text.match(regex)
-  if (!m?.[1]) return undefined
-  const val = parseInt(m[1].replace(/[\s\u00a0]/g, ""))
-  return isNaN(val) ? undefined : val
-}
+  const runBackground = async () => {
+    try {
+      // SeLoger API — 5 pages × ~20 annonces = ~100 résultats
+      const slPages = await Promise.allSettled([
+        fetchSeLogerAPI(1, bouquetMax),
+        fetchSeLogerAPI(2, bouquetMax),
+        fetchSeLogerAPI(3, bouquetMax),
+        fetchSeLogerAPI(4, bouquetMax),
+        fetchSeLogerAPI(5, bouquetMax),
+      ])
+      const slListings = slPages
+        .filter(r => r.status === "fulfilled")
+        .flatMap(r => (r as PromiseFulfilledResult<Listing[]>).value)
 
-function extractMontant(text: string, regex: RegExp, min: number, max: number): number | undefined {
-  const val = extractNumber(text, regex)
-  if (val === undefined) return undefined
-  return val >= min && val <= max ? val : undefined
-}
+      // Renée Costes sitemap
+      const rcListings = await fetchReneeCostes()
 
-function extractViagerData(markdown: string) {
-  const clean = markdown.replace(/\s+/g, " ")
-  const data: any = {}
+      const all = [...slListings, ...rcListings]
 
-  data.typeVente = detectTypeVente(clean)
-
-  data.bouquet = extractMontant(clean, /bouquet\s*(?:FAI)?[^\d€]{0,10}([0-9][0-9\s]{2,8})\s*€?/i, 1000, 500000)
-    ?? extractMontant(clean, /([0-9][0-9\s]{4,8})\s*€?\s*(?:FAI|hono)/i, 1000, 500000)
-
-  if (data.typeVente === "terme") {
-    data.mensualite = extractMontant(clean, /mensualit[eé]s?\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
-      ?? extractMontant(clean, /([0-9][0-9\s]{2,6})\s*€?\s*\/\s*mois/i, 100, 10000)
-    if (data.mensualite) data.rente = data.mensualite
-
-    data.termeMois = extractMontant(clean, /terme\s*:?\s*([0-9]{2,4})\s*mois/i, 12, 360)
-      ?? extractMontant(clean, /([0-9]{2,4})\s*mois/i, 12, 360)
-
-    data.valeurVenale = extractMontant(clean, /prix\s*(?:d.achat|total|FAI)[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 2000000)
-
-    data.loyerMensuelManuel = extractMontant(clean, /loyer\s*garanti\s*:?\s*([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
-      ?? extractMontant(clean, /loyer\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
-
-  } else {
-    data.rente = extractMontant(clean, /rente[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 3000)
-      ?? extractMontant(clean, /([0-9][0-9\s]{2,5})\s*€\s*\/\s*mois/i, 100, 3000)
-
-    data.valeurVenale = extractMontant(clean, /valeur\s*v[eé]nale[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 30000, 5000000)
-      ?? extractMontant(clean, /valeur\s*du\s*bien[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 30000, 5000000)
-      ?? extractMontant(clean, /prix\s*(?:du\s*bien|march[eé])[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 30000, 5000000)
-      ?? extractMontant(clean, /estim[eé][^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 30000, 5000000)
-
-    const ageMatch = clean.match(/(?:dame|femme|homme|monsieur|vendeur|occup[eé])[^\d]{0,15}(\d{2})\s*ans/i)
-      ?? clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
-      ?? clean.match(/[aâ]g[eé][^\d]{0,5}(\d{2})/i)
-    if (ageMatch) {
-      const age = parseInt(ageMatch[1])
-      if (age >= 55 && age <= 99) {
-        data.occupant1Age = age
-        data.occupant1Sexe = /dame|femme/i.test(ageMatch[0]) ? "F" : "H"
-      }
-    }
-
-    if (data.typeVente === "libre") {
-      data.loyerMensuelManuel = extractMontant(clean, /loyer[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
-    }
-  }
-
-  data.superficie = extractMontant(clean, /([0-9]{2,3})\s*m²?\s*(?:carrez|habitable|loi)/i, 10, 500)
-    ?? extractMontant(clean, /superficie[^\d]{0,5}([0-9]{2,3})\s*m/i, 10, 500)
-    ?? extractMontant(clean, /([0-9]{2,3})\s*m²/i, 10, 500)
-
-  data.taxeFonciere = extractMontant(clean, /taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
-    ?? extractMontant(clean, /TF\s*(?:hors\s*TEOM)?[^\d€]{0,5}([0-9][0-9\s]{2,5})\s*€?/, 100, 10000)
-
-  const chgMatch = clean.match(/charges\s*trimestrielles?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
-    ?? clean.match(/charges\s*de\s*(?:copro|copropri[eé]t[eé])[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
-    ?? clean.match(/charges\s*(?:annuelles?|\/an)[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
-    ?? clean.match(/charges[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/\s*(?:an|trim|mois)/i)
-  if (chgMatch) {
-    let val = parseInt(chgMatch[1].replace(/\s/g, ""))
-    if (/trim/i.test(chgMatch[0])) val = val * 4
-    if (/mois/i.test(chgMatch[0])) val = val * 12
-    if (val >= 100 && val <= 15000) data.chargesCopro = val
-  }
-
-  const villeCP = clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)\s*\((\d{5})\)/i)
-  if (villeCP) {
-    data.ville = villeCP[1].trim()
-    data.codePostal = villeCP[2]
-  } else {
-    const villeSitue = clean.match(/situ[eé][^\w]{0,5}(?:à|a|au|en)\s+([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)/i)
-    if (villeSitue) data.ville = villeSitue[1].trim()
-  }
-
-  const keysTerme = ["bouquet", "mensualite", "termeMois"]
-  const keysViager = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"]
-  const keys = data.typeVente === "terme" ? keysTerme : keysViager
-  const filled = keys.filter(k => data[k] != null).length
-  data.confidence = filled / keys.length
-
-  return { data, confidence: data.confidence }
-}
-
-async function scrapeWithFirecrawl(url: string) {
-  const apiKey = process.env.FIRECRAWL_API_KEY
-  if (!apiKey) throw new Error("FIRECRAWL_API_KEY manquante")
-  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-    body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true, waitFor: 3000 }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(`Firecrawl ${res.status}: ${(err as any).error || res.statusText}`)
-  }
-  const json = await res.json()
-  return json.data?.markdown || json.markdown || ""
-}
-
-function detectSource(url: string): string {
-  if (/seloger\.com/i.test(url)) return "SeLoger"
-  if (/costes-viager\.com/i.test(url)) return "Renée Costes"
-  if (/leboncoin\.fr/i.test(url)) return "LeBonCoin"
-  if (/pap\.fr/i.test(url)) return "PAP"
-  return "Autres"
-}
-
-export async function POST(req: NextRequest) {
-  const ip = req.headers.get("x-forwarded-for") || "unknown"
-  if (!rateLimit(ip)) return NextResponse.json({ error: "Trop de requêtes" }, { status: 429 })
-
-  let url: string
-  try {
-    const body = await req.json()
-    url = body.url
-    if (!url || typeof url !== "string") throw new Error()
-    new URL(url)
-  } catch {
-    return NextResponse.json({ error: "URL invalide" }, { status: 400 })
-  }
-
-  try {
-    const source = detectSource(url)
-    const markdown = await scrapeWithFirecrawl(url)
-
-    if (!markdown || markdown.length < 100) {
-      return NextResponse.json({
-        success: true,
-        data: { source, url, confidence: 0, data: {}, error: "Page vide — saisie manuelle" }
+      // Dédupliquer
+      const seen: Record<string, boolean> = {}
+      const unique = all.filter(l => {
+        if (seen[l.url]) return false
+        seen[l.url] = true
+        return true
       })
+
+      const filtered = unique.filter(l => passeFiltres(l, bouquetMax))
+
+      // Sauvegarder en base via /api/import
+      for (const listing of filtered.slice(0, 100)) {
+        try {
+          await fetch(`${protocol}://${origin}/api/import`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: listing.url }),
+          })
+        } catch { }
+      }
+    } catch (e) {
+      console.error("Background scraping error:", e)
     }
-
-    const { data, confidence } = extractViagerData(markdown)
-
-    if (confidence > 0.2) {
-      try {
-        const origin = req.headers.get("host") || ""
-        const protocol = origin.includes("localhost") ? "http" : "https"
-        await fetch(`${protocol}://${origin}/api/listings`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, source, data, confidence }),
-        })
-      } catch { }
-    }
-
-    return NextResponse.json({ success: true, data: { source, url, confidence, data } })
-
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || "Erreur interne" }, { status: 500 })
   }
-}
 
-export async function GET() {
-  return NextResponse.json({ message: "POST /api/import avec { url: '...' }" })
+  runBackground().catch(console.error)
+
+  return NextResponse.json({
+    success: true,
+    message: "Scraping SeLoger API + Renée Costes lancé en arrière-plan",
+    filters: { bouquetMax, renteMax: 600, type: "appartement", zone: "France" },
+    startedAt: new Date().toISOString(),
+  })
 }
