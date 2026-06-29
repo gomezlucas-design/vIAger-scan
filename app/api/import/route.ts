@@ -9,85 +9,172 @@ function rateLimit(ip: string): boolean {
   return true
 }
 
-function extractViagerData(markdown: string) {
+function detectTypeVente(text: string): "occupe" | "libre" | "terme" {
+  const t = text.toLowerCase()
+  if (
+    /vente\s+[aà]\s+terme/i.test(t) ||
+    /terme\s+(?:libre|occup[eé])/i.test(t) ||
+    /mensualit[eé]s?\s*:?\s*\d/i.test(t) ||
+    /\b(?:120|150|180|240)\s*mois\b/i.test(t)
+  ) return "terme"
+  if (
+    /viager\s+libre/i.test(t) ||
+    /bien\s+libre/i.test(t) ||
+    /libre\s+de\s+toute\s+(?:occupation|charge)/i.test(t) ||
+    /occupation\s+libre/i.test(t) ||
+    /nue[\s-]?propri[eé]t[eé]/i.test(t) ||
+    /vendu?\s+libre/i.test(t)
+  ) return "libre"
+  return "occupe"
+}
+
+function isBienVendu(text: string): boolean {
+  return /\b(?:vendu|sold|sous\s+compromis|sous\s+offre|plus\s+disponible|offre\s+accept[eé]e|vente\s+r[eé]alis[eé]e)\b/i.test(text)
+}
+
+function isMaison(text: string, url: string): boolean {
+  if (/\bmaison\b|\bvilla\b|\bpavillon\b|\bchalet\b|\bfermette\b/i.test(text)) {
+    if (!/\bappartement\b|\bappt?\b|\bstudio\b/i.test(text)) return true
+  }
+  if (/\/maison[-_]/i.test(url)) return true
+  return false
+}
+
+function extractDatePublication(text: string): string | undefined {
+  const patterns = [
+    /publi[eé][^\d]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/i,
+    /mise\s+en\s+ligne[^\d]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/i,
+    /date[^\d]*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/i,
+    /(\d{4})-(\d{2})-(\d{2})/,
+  ]
+  for (const p of patterns) {
+    const m = text.match(p)
+    if (m) {
+      try {
+        if (m[0].includes("-") && m[1].length === 4) {
+          return new Date(`${m[1]}-${m[2]}-${m[3]}`).toISOString().slice(0, 10)
+        }
+        return new Date(`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`).toISOString().slice(0, 10)
+      } catch { continue }
+    }
+  }
+  return undefined
+}
+
+function isTropAncien(dateStr?: string): boolean {
+  if (!dateStr) return false
+  const date = new Date(dateStr)
+  const diff = (Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)
+  return diff > 90
+}
+
+function extractNumber(text: string, regex: RegExp, min: number, max: number): number | undefined {
+  const m = text.match(regex)
+  if (!m?.[1]) return undefined
+  const val = parseInt(m[1].replace(/[\s\u00a0]/g, ""))
+  return !isNaN(val) && val >= min && val <= max ? val : undefined
+}
+
+function extractViagerData(markdown: string, url: string) {
   const clean = markdown.replace(/\s+/g, " ")
   const data: any = {}
 
-  const bouquet = clean.match(/bouquet[^\d€]*([0-9][0-9\s]{2,8})\s*€?/i)
-    || clean.match(/([0-9][0-9\s]{4,8})\s*€?\s*(?:FAI|hai|hono)/i)
-  if (bouquet) data.bouquet = parseInt(bouquet[1].replace(/\s/g, ""))
+  data.typeVente = detectTypeVente(clean)
+  data.estVendu = isBienVendu(clean)
+  data.estMaison = isMaison(clean, url)
+  data.datePublication = extractDatePublication(clean)
+  data.estTropAncien = isTropAncien(data.datePublication)
 
-  const rente = clean.match(/rente[^\d€]*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i)
-    || clean.match(/([0-9][0-9\s]{2,6})\s*€\s*\/\s*mois/i)
-  if (rente) data.rente = parseInt(rente[1].replace(/\s/g, ""))
+  data.bouquet = extractNumber(clean, /bouquet\s*(?:FAI)?[^\d€]{0,10}([0-9][0-9\s]{2,8})\s*€?/i, 1000, 500000)
+    ?? extractNumber(clean, /([0-9][0-9\s]{4,8})\s*€?\s*(?:FAI|hono)/i, 1000, 500000)
 
-  const vv = clean.match(/valeur\s*v[eé]nale[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
-    || clean.match(/valeur\s*du\s*bien[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
-    || clean.match(/prix\s*(?:du\s*bien|march[eé])[^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
-    || clean.match(/estim[eé][^\d€]*([0-9][0-9\s]{4,8})\s*€?/i)
-  if (vv) data.valeurVenale = parseInt(vv[1].replace(/\s/g, ""))
+  if (data.typeVente === "terme") {
+    data.mensualite = extractNumber(clean, /mensualit[eé]s?\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
+      ?? extractNumber(clean, /([0-9][0-9\s]{2,6})\s*€?\s*\/\s*mois/i, 100, 10000)
+    if (data.mensualite) data.rente = data.mensualite
 
-  const surf = clean.match(/([0-9]{2,3})\s*m²?\s*(?:carrez|habitable|loi)/i)
-    || clean.match(/superficie[^\d]*([0-9]{2,3})\s*m/i)
-    || clean.match(/([0-9]{2,3})\s*m²/i)
-  if (surf) data.superficie = parseInt(surf[1])
+    data.termeMois = extractNumber(clean, /terme\s*:?\s*([0-9]{2,4})\s*mois/i, 12, 360)
+      ?? extractNumber(clean, /([0-9]{2,4})\s*mois/i, 12, 360)
 
-  const age = clean.match(/(?:dame|femme|homme|monsieur|vendeur)[^\d]*(\d{2})\s*ans/i)
-    || clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
-    || clean.match(/occup[eé]\s*par[^\d]*(\d{2})\s*ans/i)
-  if (age) {
-    data.occupant1Age = parseInt(age[1])
-    data.occupant1Sexe = /dame|femme/i.test(age[0]) ? "F" : "H"
+    data.valeurVenale = extractNumber(clean, /prix\s*(?:d.achat|total|FAI)[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 3000000)
+
+    data.loyerMensuelManuel = extractNumber(clean, /loyer\s*garanti\s*:?\s*([0-9][0-9\s]{2,6})\s*€?/i, 100, 15000)
+      ?? extractNumber(clean, /loyer\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 15000)
+
+  } else {
+    data.rente = extractNumber(clean, /rente[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 50, 5000)
+      ?? extractNumber(clean, /([0-9][0-9\s]{2,5})\s*€\s*\/\s*mois/i, 50, 5000)
+
+    data.valeurVenale = extractNumber(clean, /valeur\s*v[eé]nale[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNumber(clean, /valeur\s*du\s*bien[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNumber(clean, /prix\s*(?:du\s*bien|march[eé])[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNumber(clean, /estim[eé][^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+
+    const ageMatch = clean.match(/(?:dame|femme|homme|monsieur|vendeur|occup[eé])[^\d]{0,15}(\d{2})\s*ans/i)
+      ?? clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
+      ?? clean.match(/[aâ]g[eé]\s*(?:de\s*)?(\d{2})\s*ans/i)
+    if (ageMatch) {
+      const age = parseInt(ageMatch[1])
+      if (age >= 55 && age <= 99) {
+        data.occupant1Age = age
+        data.occupant1Sexe = /dame|femme/i.test(ageMatch[0]) ? "F" : "H"
+      }
+    }
+
+    if (data.typeVente === "libre") {
+      data.loyerMensuelManuel = extractNumber(clean, /loyer[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 15000)
+        ?? extractNumber(clean, /loyer\s*estim[eé][^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 15000)
+    }
   }
 
-  const tf = clean.match(/taxe\s*fonci[eè]re[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
-    || clean.match(/TF[^\d€]*([0-9][0-9\s]{2,6})\s*€?/)
-  if (tf) data.taxeFonciere = parseInt(tf[1].replace(/\s/g, ""))
+  data.superficie = extractNumber(clean, /([0-9]{2,3})\s*m²?\s*(?:carrez|habitable|loi)/i, 10, 500)
+    ?? extractNumber(clean, /superficie[^\d]{0,5}([0-9]{2,3})\s*m/i, 10, 500)
+    ?? extractNumber(clean, /([0-9]{2,3})\s*m²/i, 10, 500)
 
-  const chg = clean.match(/charges\s*trimestrielles?[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
-    || clean.match(/charges\s*de\s*copro[^\d€]*([0-9][0-9\s]{2,6})\s*€?/i)
-    || clean.match(/charges[^\d€]*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*(?:an|trim|mois)/i)
-  if (chg) {
-    let val = parseInt(chg[1].replace(/\s/g, ""))
-    if (/trim/i.test(chg[0])) val = val * 4
-    if (/mois/i.test(chg[0])) val = val * 12
-    data.chargesCopro = val
+  data.taxeFonciere = extractNumber(clean, /taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
+    ?? extractNumber(clean, /TF\s*(?:hors\s*TEOM)?[^\d€]{0,5}([0-9][0-9\s]{2,5})\s*€?/, 100, 10000)
+
+  const chgMatch = clean.match(/charges\s*trimestrielles?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges\s*de\s*(?:copro|copropri[eé]t[eé])[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges\s*(?:annuelles?)[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/\s*(?:an|trim|mois)/i)
+  if (chgMatch) {
+    let val = parseInt(chgMatch[1].replace(/\s/g, ""))
+    if (/trim/i.test(chgMatch[0])) val *= 4
+    if (/mois/i.test(chgMatch[0])) val *= 12
+    if (val >= 100 && val <= 15000) data.chargesCopro = val
   }
 
-  const ville = clean.match(/situ[eé][^\w]*(?:à|a|au|en)\s+([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü0-9][a-zà-ü0-9]*)*)/i)
-    || clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:\s+[A-ZÀ-Ü][a-zà-ü]*)*)\s*\(\d{5}\)/i)
-  if (ville) data.ville = ville[1].trim()
+  const villeCP = clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)\s*\((\d{5})\)/i)
+  if (villeCP) {
+    data.ville = villeCP[1].trim()
+    data.codePostal = villeCP[2]
+  } else {
+    const villeSitue = clean.match(/situ[eé][^\w]{0,5}(?:à|a|au|en)\s+([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)/i)
+    if (villeSitue) data.ville = villeSitue[1].trim()
+  }
 
-  const filled = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"]
-    .filter(k => data[k] != null).length
-  const confidence = filled / 5
+  const keysTerme = ["bouquet", "mensualite", "termeMois"]
+  const keysViager = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"]
+  const keys = data.typeVente === "terme" ? keysTerme : keysViager
+  const filled = keys.filter(k => data[k] != null).length
+  data.confidence = filled / keys.length
 
-  return { data, confidence }
+  return { data, confidence: data.confidence }
 }
 
 async function scrapeWithFirecrawl(url: string) {
   const apiKey = process.env.FIRECRAWL_API_KEY
   if (!apiKey) throw new Error("FIRECRAWL_API_KEY manquante")
-
   const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      url,
-      formats: ["markdown"],
-      onlyMainContent: true,
-      waitFor: 2000,
-    }),
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true, waitFor: 3000 }),
   })
-
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(`Firecrawl ${res.status}: ${(err as any).error || res.statusText}`)
   }
-
   const json = await res.json()
   return json.data?.markdown || json.markdown || ""
 }
@@ -102,9 +189,7 @@ function detectSource(url: string): string {
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for") || "unknown"
-  if (!rateLimit(ip)) {
-    return NextResponse.json({ error: "Trop de requêtes" }, { status: 429 })
-  }
+  if (!rateLimit(ip)) return NextResponse.json({ error: "Trop de requêtes" }, { status: 429 })
 
   let url: string
   try {
@@ -123,16 +208,28 @@ export async function POST(req: NextRequest) {
     if (!markdown || markdown.length < 100) {
       return NextResponse.json({
         success: true,
-        data: {
-          source, url, confidence: 0, data: {},
-          error: "Page vide ou bloquée — essaie la saisie manuelle",
-        }
+        data: { source, url, confidence: 0, data: {}, error: "Page vide — saisie manuelle" }
       })
     }
 
-    const { data, confidence } = extractViagerData(markdown)
+    const { data, confidence } = extractViagerData(markdown, url)
 
-    // Sauvegarder en base si données suffisantes
+    if (data.estVendu) {
+      return NextResponse.json({ success: true, data: { source, url, confidence: 0, data: {}, error: "Bien vendu — ignoré", rejected: "vendu" } })
+    }
+    if (data.estMaison) {
+      return NextResponse.json({ success: true, data: { source, url, confidence: 0, data: {}, error: "Maison — ignorée", rejected: "maison" } })
+    }
+    if (data.estTropAncien) {
+      return NextResponse.json({ success: true, data: { source, url, confidence: 0, data: {}, error: "Annonce > 90 jours — ignorée", rejected: "ancienne" } })
+    }
+    if (data.taxeFonciere && data.taxeFonciere > 1500) {
+      return NextResponse.json({ success: true, data: { source, url, confidence: 0, data: {}, error: `TF ${data.taxeFonciere}€/an > 1500€ — ignorée`, rejected: "tf_elevee" } })
+    }
+    if (data.chargesCopro && data.chargesCopro > 1600) {
+      return NextResponse.json({ success: true, data: { source, url, confidence: 0, data: {}, error: `Charges ${data.chargesCopro}€/an > 1600€ — ignorée`, rejected: "charges_elevees" } })
+    }
+
     if (confidence > 0.2) {
       try {
         const origin = req.headers.get("host") || ""
@@ -142,15 +239,10 @@ export async function POST(req: NextRequest) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url, source, data, confidence }),
         })
-      } catch {
-        // Silencieux si DB indisponible
-      }
+      } catch { }
     }
 
-    return NextResponse.json({
-      success: true,
-      data: { source, url, confidence, data },
-    })
+    return NextResponse.json({ success: true, data: { source, url, confidence, data } })
 
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Erreur interne" }, { status: 500 })
