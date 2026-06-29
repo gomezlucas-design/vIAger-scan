@@ -892,76 +892,133 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────
-function SignalModal({ offre, onClose }: { offre: any; onClose: () => void }) {
-  const [note, setNote] = useState("");
-  const [field, setField] = useState("bouquet");
-  const [sent, setSent] = useState(false);
+function SignalModal({ offre, onClose, onCorrect }: { offre: any; onClose: () => void; onCorrect: (id: any, corrections: any) => void }) {
+  const [step, setStep] = useState<"main"|"correct"|"done">("main");
+  const [corrections, setCorrections] = useState<any>({
+    bouquet: offre.bouquet || "",
+    rente: offre.rente || "",
+    valeurVenale: offre.valeurVenale || "",
+    taxeFonciere: offre.taxeFonciere || "",
+    chargesCopro: offre.chargesCopro || "",
+    occupant1Age: offre.occupant1Age || "",
+    superficie: offre.superficie || "",
+  });
 
-  const fields = [
-    ["bouquet", "Bouquet trop élevé / trop bas"],
-    ["rente", "Rente incorrecte"],
-    ["valeurVenale", "Valeur vénale erronée"],
-    ["taxeFonciere", "Taxe foncière incorrecte"],
-    ["chargesCopro", "Charges copro incorrectes"],
-    ["occupant1Age", "Âge occupant incorrect"],
-    ["superficie", "Superficie incorrecte"],
-    ["typeVente", "Type de vente incorrect"],
-    ["autre", "Autre problème"],
-  ];
+  const upd = (k: string, v: string) => setCorrections((p: any) => ({ ...p, [k]: v === "" ? "" : +v }));
 
-  const send = () => {
-    // Sauvegarde locale du signal (pourrait être envoyé à une API)
-    const signals = JSON.parse(sessionStorage.getItem("viager_signals") || "[]");
-    signals.push({ url: offre.url, ville: offre.ville, field, note, date: new Date().toISOString() });
-    sessionStorage.setItem("viager_signals", JSON.stringify(signals));
-    setSent(true);
-    setTimeout(onClose, 1500);
+  const save = () => {
+    // Nettoyer — garder uniquement les champs remplis
+    const clean: any = {};
+    Object.entries(corrections).forEach(([k, v]) => {
+      if (v !== "" && v !== null && v !== undefined) clean[k] = +v;
+    });
+    onCorrect(offre.id, clean);
+    setStep("done");
+    setTimeout(onClose, 1200);
   };
 
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 400, padding: 16 }} onClick={onClose}>
-      <div style={{ background: C.surface, borderRadius: 16, width: "min(95vw,480px)", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,.2)" }} onClick={e => e.stopPropagation()}>
-        {sent ? (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Signalement enregistré</div>
-            <div style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>Merci pour la correction</div>
-          </div>
-        ) : (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>Signaler une anomalie</div>
-                <div style={{ fontSize: 11, color: C.text3, marginTop: 2 }}>{offre.ville} — {offre.source}</div>
-              </div>
-              <button onClick={onClose} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: C.text3 }}>✕</button>
-            </div>
+  const fields = [
+    ["bouquet", "Bouquet (€)"],
+    ["rente", "Rente mensuelle (€/mois)"],
+    ["valeurVenale", "Valeur vénale (€)"],
+    ["taxeFonciere", "Taxe foncière (€/an)"],
+    ["chargesCopro", "Charges copro (€/an)"],
+    ["occupant1Age", "Âge occupant (ans)"],
+    ["superficie", "Superficie (m²)"],
+  ];
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: C.text2, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: ".05em" }}>Champ concerné</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {fields.map(([f, l]) => (
-                  <button key={f} onClick={() => setField(f)}
-                    style={{ background: field === f ? `${C.orange}12` : C.bg, color: field === f ? C.orange : C.text2, border: `1px solid ${field === f ? C.orange + "40" : C.border}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 12, textAlign: "left", fontWeight: field === f ? 600 : 400 }}>
-                    {field === f ? "● " : "○ "}{l}
-                  </button>
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 400 }} onClick={onClose}>
+      <div style={{ background: C.surface, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 520, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 -8px 40px rgba(0,0,0,.15)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 0" }}>
+          <div style={{ width: 36, height: 4, background: C.border, borderRadius: 2 }} />
+        </div>
+        <div style={{ padding: "16px 20px 28px" }}>
+
+          {step === "done" && (
+            <div style={{ textAlign: "center", padding: "30px 0" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Corrections sauvegardées</div>
+              <div style={{ fontSize: 12, color: C.text3, marginTop: 4 }}>La card est mise à jour</div>
+            </div>
+          )}
+
+          {step === "main" && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Vérifier cette annonce</div>
+                  <div style={{ fontSize: 12, color: C.text3, marginTop: 3 }}>{offre.ville} · {offre.source}</div>
+                </div>
+                <button onClick={onClose} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, width: 30, height: 30, cursor: "pointer", fontSize: 14, color: C.text3 }}>✕</button>
+              </div>
+
+              {/* Données actuelles */}
+              <div style={{ background: C.bg, borderRadius: 10, padding: 14, marginBottom: 16, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10, fontWeight: 600 }}>Données actuelles dans l'app</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[
+                    ["Bouquet", offre.bouquet ? fmt(offre.bouquet) : "—"],
+                    ["Rente", offre.rente ? fmt(offre.rente) + "/m" : "—"],
+                    ["Valeur vénale", offre.valeurVenale ? fmt(offre.valeurVenale) : "—"],
+                    ["TF", offre.taxeFonciere ? fmt(offre.taxeFonciere) + "/an" : "—"],
+                    ["Charges", offre.chargesCopro ? fmt(offre.chargesCopro) + "/an" : "—"],
+                    ["Âge", offre.occupant1Age ? `${offre.occupant1Age} ans` : "—"],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ fontSize: 12 }}>
+                      <span style={{ color: C.text3 }}>{k} : </span>
+                      <span style={{ color: C.text, fontWeight: 600 }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bouton voir annonce */}
+              {offre.url && (
+                <a href={offre.url} target="_blank" rel="noreferrer"
+                  style={{ display: "block", background: C.blue, color: C.white, borderRadius: 10, padding: "13px 20px", textAlign: "center", textDecoration: "none", fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+                  🔗 Voir l'annonce source →
+                </a>
+              )}
+              <div style={{ fontSize: 11, color: C.text3, textAlign: "center", marginBottom: 16 }}>
+                Vérifie les chiffres sur le site, puis reviens corriger ci-dessous
+              </div>
+
+              <button onClick={() => setStep("correct")}
+                style={{ width: "100%", background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                ✏️ Corriger les données
+              </button>
+            </>
+          )}
+
+          {step === "correct" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+                <button onClick={() => setStep("main")} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, color: C.text3 }}>←</button>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>Corriger les données</div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+                {fields.map(([k, l]) => (
+                  <div key={k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>{l}</label>
+                    <input
+                      type="number"
+                      value={corrections[k]}
+                      onChange={e => upd(k, e.target.value)}
+                      style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, color: C.text, width: "100%" }}
+                    />
+                  </div>
                 ))}
               </div>
-            </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, color: C.text2, fontWeight: 600, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".05em" }}>Note (optionnel)</div>
-              <textarea value={note} onChange={e => setNote(e.target.value)}
-                placeholder="Ex: le bouquet affiché est 74 000€ mais devrait être 48 000€..."
-                style={{ width: "100%", minHeight: 70, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: C.text, resize: "none", fontFamily: "inherit" }} />
-            </div>
-
-            <button onClick={send}
-              style={{ width: "100%", background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
-              Envoyer le signalement
-            </button>
-          </>
-        )}
+              <button onClick={save}
+                style={{ width: "100%", background: C.green, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                ✓ Sauvegarder les corrections
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -978,7 +1035,6 @@ export default function ViagerScan() {
   const [dbLoaded, setDbLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [signal, setSignal] = useState<{offre: any, field?: string} | null>(null);
-  const [signalNote, setSignalNote] = useState("");
   const [showHypo, setShowHypo] = useState(false);
   const [hypo, setHypo] = useState({ inflation: 3, croissanceTF: 4, appreciationBien: 0 });
   const [favoris, setFavoris] = useState<Set<any>>(new Set());
@@ -1123,6 +1179,18 @@ export default function ViagerScan() {
   }, [computed, sortBy, filterSource, search, activeTab, favoris, anomalies]);
 
   const addOffre = (o: any) => setOffres(p => [...p, { ...o, id: Math.max(0, ...p.map((x: any) => x.id)) + 1 }]);
+  const correctOffre = (id: any, corrections: any) => {
+    setOffres(p => p.map((o: any) => o.id === id ? { ...o, ...corrections } : o));
+    // Mettre à jour en base Neon si c'est une annonce DB
+    if (String(id).startsWith("db-")) {
+      const dbId = String(id).replace("db-", "");
+      fetch("/api/listings/" + dbId, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corrections),
+      }).catch(() => {});
+    }
+  };
   const delOffre = (id: number) => setOffres(p => p.filter((o: any) => o.id !== id));
   const sources = ["Tous", ...Array.from(new Set(offres.map(o => o.source)))];
 
@@ -1286,7 +1354,7 @@ export default function ViagerScan() {
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={addOffre} />}
       {detail && <DetailPanel offre={detail} onClose={() => setDetail(null)} />}
-      {signal && <SignalModal offre={signal.offre} onClose={() => setSignal(null)} />}
+      {signal && <SignalModal offre={signal.offre} onClose={() => setSignal(null)} onCorrect={correctOffre} />}
     </div>
   );
 }
