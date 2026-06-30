@@ -850,8 +850,101 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori
   );
 }
 
+// ─── Parser texte collé — extraction côté client ──────────────────────────
+function parsePastedText(text: string): { data: any; confidence: number } {
+  const clean = text.replace(/\s+/g, " ").trim();
+  const data: any = {};
+
+  const extractNum = (regex: RegExp, min: number, max: number): number | undefined => {
+    const m = clean.match(regex);
+    if (!m?.[1]) return undefined;
+    const val = parseInt(m[1].replace(/[\s\u00a0]/g, ""));
+    return !isNaN(val) && val >= min && val <= max ? val : undefined;
+  };
+
+  // Type de vente
+  const t = clean.toLowerCase();
+  if (/vente\s+[aà]\s+terme|terme\s+(?:libre|occup[eé])|mensualit[eé]s?\s*:?\s*\d|\b(?:120|150|180|240)\s*mois\b/i.test(t)) {
+    data.typeVente = "terme";
+  } else if (/viager\s+libre|bien\s+libre|libre\s+de\s+toute|nue[\s-]?propri[eé]t[eé]/i.test(t)) {
+    data.typeVente = "libre";
+  } else {
+    data.typeVente = "occupe";
+  }
+
+  // Bouquet
+  data.bouquet = extractNum(/bouquet\s*(?:FAI)?[^\d€]{0,10}([0-9][0-9\s]{2,8})\s*€?/i, 1000, 500000)
+    ?? extractNum(/([0-9][0-9\s]{4,8})\s*€?\s*(?:FAI|hono)/i, 1000, 500000);
+
+  if (data.typeVente === "terme") {
+    data.mensualite = extractNum(/mensualit[eé]s?\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
+      ?? extractNum(/([0-9][0-9\s]{2,6})\s*€?\s*\/\s*mois/i, 100, 10000);
+    if (data.mensualite) data.rente = data.mensualite;
+    data.termeMois = extractNum(/terme\s*:?\s*([0-9]{2,4})\s*mois/i, 12, 360)
+      ?? extractNum(/([0-9]{2,4})\s*mois/i, 12, 360);
+    data.valeurVenale = extractNum(/prix\s*(?:d.achat|total|FAI)[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 3000000);
+    data.loyerMensuelManuel = extractNum(/loyer\s*garanti\s*:?\s*([0-9][0-9\s]{2,6})\s*€?/i, 100, 15000)
+      ?? extractNum(/loyer\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 15000);
+  } else {
+    data.rente = extractNum(/rente[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 50, 5000)
+      ?? extractNum(/([0-9][0-9\s]{2,5})\s*€\s*\/\s*mois/i, 50, 5000);
+    data.valeurVenale = extractNum(/valeur\s*v[eé]nale[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNum(/valeur\s*du\s*bien[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNum(/prix\s*(?:du\s*bien|march[eé])[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
+      ?? extractNum(/estim[eé][^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000);
+
+    const ageMatch = clean.match(/(?:dame|femme|homme|monsieur|vendeur|occup[eé])[^\d]{0,15}(\d{2})\s*ans/i)
+      ?? clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
+      ?? clean.match(/[aâ]g[eé]\s*(?:de\s*)?(\d{2})\s*ans/i);
+    if (ageMatch) {
+      const age = parseInt(ageMatch[1]);
+      if (age >= 55 && age <= 99) {
+        data.occupant1Age = age;
+        data.occupant1Sexe = /dame|femme/i.test(ageMatch[0]) ? "F" : "H";
+      }
+    }
+
+    if (data.typeVente === "libre") {
+      data.loyerMensuelManuel = extractNum(/loyer[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 15000);
+    }
+  }
+
+  data.superficie = extractNum(/([0-9]{2,3})\s*m²?\s*(?:carrez|habitable|loi)/i, 10, 500)
+    ?? extractNum(/superficie[^\d]{0,5}([0-9]{2,3})\s*m/i, 10, 500)
+    ?? extractNum(/([0-9]{2,3})\s*m²/i, 10, 500);
+
+  data.taxeFonciere = extractNum(/taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
+    ?? extractNum(/TF\s*(?:hors\s*TEOM)?[^\d€]{0,5}([0-9][0-9\s]{2,5})\s*€?/, 100, 10000);
+
+  const chgMatch = clean.match(/charges\s*trimestrielles?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges\s*de\s*(?:copro|copropri[eé]t[eé])[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges\s*(?:annuelles?)[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+    ?? clean.match(/charges[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/\s*(?:an|trim|mois)/i);
+  if (chgMatch) {
+    let val = parseInt(chgMatch[1].replace(/\s/g, ""));
+    if (/trim/i.test(chgMatch[0])) val *= 4;
+    if (/mois/i.test(chgMatch[0])) val *= 12;
+    if (val >= 100 && val <= 15000) data.chargesCopro = val;
+  }
+
+  const villeCP = clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)\s*\((\d{5})\)/i);
+  if (villeCP) {
+    data.ville = villeCP[1].trim();
+    data.codePostal = villeCP[2];
+  }
+
+  const keysTerme = ["bouquet", "mensualite", "termeMois"];
+  const keysViager = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"];
+  const keys = data.typeVente === "terme" ? keysTerme : keysViager;
+  const filled = keys.filter(k => data[k] != null).length;
+  const confidence = filled / keys.length;
+
+  return { data, confidence };
+}
+
 function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o: any) => void }) {
   const [url, setUrl] = useState("");
+  const [pastedText, setPastedText] = useState("");
   const [step, setStep] = useState("input");
   const [errMsg, setErrMsg] = useState("");
   const [parsed, setParsed] = useState<any>(null);
@@ -869,6 +962,14 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
       setEdited((p: any) => ({ ...p, ...result.data, url: url.trim(), source: result.source }));
       setStep("form");
     } catch (e: any) { setErrMsg(e.message || "Erreur inconnue"); setStep("error"); }
+  };
+
+  const analyzeText = () => {
+    if (!pastedText.trim() || pastedText.trim().length < 50) return;
+    const { data, confidence } = parsePastedText(pastedText);
+    setParsed({ source: "Texte collé", confidence });
+    setEdited((p: any) => ({ ...p, ...data, source: "Manuel" }));
+    setStep("form");
   };
 
   const add = () => {
@@ -947,21 +1048,42 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
           </div>
 
           {step === "input" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 12, color: C.text3 }}>Colle une URL pour auto-remplir, ou saisis directement les données</div>
-              <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && analyze()}
-                placeholder="https://www.costes-viager.com/acheter/..."
-                style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, padding: "13px 16px", fontSize: 14, width: "100%" }} />
-              <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Option 1 — URL */}
+              <div>
+                <div style={{ fontSize: 12, color: C.text3, marginBottom: 8 }}>Colle une URL pour auto-remplir</div>
+                <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && analyze()}
+                  placeholder="https://www.costes-viager.com/acheter/..."
+                  style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, padding: "13px 16px", fontSize: 14, width: "100%", marginBottom: 8 }} />
                 <button onClick={analyze} disabled={!url.trim()}
-                  style={{ flex: 2, background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700, opacity: url.trim() ? 1 : 0.5 }}>
-                  Analyser l'URL →
-                </button>
-                <button onClick={() => setStep("form")}
-                  style={{ flex: 1, background: C.bg, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                  Saisie manuelle
+                  style={{ width: "100%", background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700, opacity: url.trim() ? 1 : 0.5 }}>
+                  🔗 Analyser l'URL →
                 </button>
               </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+                <span style={{ fontSize: 10, color: C.text3, fontWeight: 600 }}>OU</span>
+                <div style={{ flex: 1, height: 1, background: C.border }} />
+              </div>
+
+              {/* Option 2 — Coller texte */}
+              <div>
+                <div style={{ fontSize: 12, color: C.text3, marginBottom: 8 }}>Colle le texte complet de l'annonce (Ctrl+A puis Ctrl+C sur la page)</div>
+                <textarea value={pastedText} onChange={e => setPastedText(e.target.value)}
+                  placeholder="Bouquet 74 000€ et 1 218€/mois&#10;Réf. 9935.B - VIAGER OCCUPÉ - CAGNES-SUR-MER (06)&#10;3 pièces · 74,35 m²&#10;..."
+                  style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, padding: "12px 14px", fontSize: 12, width: "100%", minHeight: 110, resize: "vertical", fontFamily: "inherit" }} />
+                <button onClick={analyzeText} disabled={pastedText.trim().length < 50}
+                  style={{ width: "100%", background: C.blue, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700, marginTop: 8, opacity: pastedText.trim().length >= 50 ? 1 : 0.5 }}>
+                  📋 Extraire les données du texte →
+                </button>
+              </div>
+
+              <button onClick={() => setStep("form")}
+                style={{ background: C.bg, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 10, padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                Saisie manuelle complète
+              </button>
             </div>
           )}
 
