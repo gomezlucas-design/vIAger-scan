@@ -640,7 +640,9 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
   const [step, setStep] = useState("input");
   const [errMsg, setErrMsg] = useState("");
   const [parsed, setParsed] = useState<any>(null);
-  const [edited, setEdited] = useState<any>(null);
+  const [edited, setEdited] = useState<any>({
+    typeVente: "occupe", occupant1Sexe: "F", source: "Manuel",
+  });
 
   const analyze = async () => {
     if (!url.trim()) return;
@@ -649,111 +651,197 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
       const result = await importFromAPI(url.trim());
       if (result.error && !result.data) { setErrMsg(result.error); setStep("error"); return; }
       setParsed(result);
-      setEdited({ ...result.data, url: url.trim(), source: result.source });
+      setEdited((p: any) => ({ ...p, ...result.data, url: url.trim(), source: result.source }));
       setStep("form");
     } catch (e: any) { setErrMsg(e.message || "Erreur inconnue"); setStep("error"); }
   };
 
   const add = () => {
-    if (!edited) return;
     onImport({
       ...edited,
-      occupant1Age: edited.occupant1Age || 78, occupant1Sexe: edited.occupant1Sexe || "F",
-      taxeFonciere: edited.taxeFonciere || 400, chargesCopro: edited.chargesCopro || 800,
+      url: url.trim() || edited.url || "",
+      occupant1Age: edited.occupant1Age || 78,
+      occupant1Sexe: edited.occupant1Sexe || "F",
+      taxeFonciere: edited.taxeFonciere || 0,
+      chargesCopro: edited.chargesCopro || 0,
       autresCharges: 0, ventilationCharges: 0.33, majorationRenteLiberation: 0.30,
-      tauxInflation: 0.03, tauxCroissanceTF: 0.04, loyerMensuelManuel: null,
+      tauxInflation: 0.03, tauxCroissanceTF: 0.04,
+      loyerMensuelManuel: edited.typeVente === "libre" ? (edited.loyerMensuelManuel || null) : null,
+      termeMois: edited.typeVente === "terme" ? (edited.termeMois || null) : null,
+      mensualite: edited.typeVente === "terme" ? (edited.mensualite || edited.rente || null) : null,
+      rente: edited.typeVente === "terme" ? (edited.mensualite || edited.rente || null) : (edited.rente || null),
       datePublication: new Date().toISOString().slice(0, 10),
-      note: edited.note || `Importé via ${edited.source}`,
       priceHistory: [{ date: new Date().toISOString().slice(0, 10), bouquet: edited.bouquet, rente: edited.rente }],
     });
     onClose();
   };
 
   const upd = (k: string, v: any) => setEdited((p: any) => ({ ...p, [k]: v }));
-  const field = (label: string, key: string, type = "number") => (
+
+  const numField = (label: string, key: string, placeholder = "") => (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</label>
-      <input type={type} value={edited?.[key] ?? ""} onChange={e => upd(key, type === "number" ? (e.target.value === "" ? "" : +e.target.value) : e.target.value)}
-        style={{ background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, padding: "10px 14px", fontSize: 13, width: "100%" }} />
+      <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>{label}</label>
+      <input type="number" value={edited?.[key] ?? ""} placeholder={placeholder}
+        onChange={e => upd(key, e.target.value === "" ? "" : +e.target.value)}
+        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 13, width: "100%" }} />
     </div>
   );
-  const reset = () => { setStep("input"); setUrl(""); setErrMsg(""); setParsed(null); setEdited(null); };
+
+  const txtField = (label: string, key: string, placeholder = "") => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>{label}</label>
+      <input type="text" value={edited?.[key] ?? ""} placeholder={placeholder}
+        onChange={e => upd(key, e.target.value)}
+        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 13, width: "100%" }} />
+    </div>
+  );
+
+  const btnToggle = (label: string, options: [string, string][], key: string) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>{label}</label>
+      <div style={{ display: "flex", gap: 4 }}>
+        {options.map(([val, lbl]) => (
+          <button key={val} onClick={() => upd(key, val)}
+            style={{ flex: 1, background: edited?.[key] === val ? C.orange : C.bg, color: edited?.[key] === val ? C.white : C.text2, border: `1px solid ${edited?.[key] === val ? C.orange : C.border}`, borderRadius: 8, padding: "9px 4px", cursor: "pointer", fontSize: 11, fontWeight: edited?.[key] === val ? 700 : 400 }}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const reset = () => {
+    setStep("input"); setUrl(""); setErrMsg(""); setParsed(null);
+    setEdited({ typeVente: "occupe", occupant1Sexe: "F", source: "Manuel" });
+  };
+
+  const sectionTitle = (t: string) => (
+    <div style={{ fontSize: 10, color: C.text3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 10, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>{t}</div>
+  );
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.92)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200, padding: 0 }} onClick={onClose}>
-      <div style={{ background: C.surface, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 620, maxHeight: "90vh", overflowY: "auto", border: `1px solid ${C.border}`, borderBottom: "none" }} onClick={e => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
+      <div style={{ background: C.surface, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 620, maxHeight: "92vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 0" }}>
-          <div style={{ width: 36, height: 4, background: C.border2, borderRadius: 2 }} />
+          <div style={{ width: 36, height: 4, background: C.border, borderRadius: 2 }} />
         </div>
-        <div style={{ padding: "16px 20px 28px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>Importer une annonce</div>
-            <button onClick={onClose} style={{ background: C.card, border: `1px solid ${C.border}`, color: C.text3, cursor: "pointer", fontSize: 16, borderRadius: 10, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        <div style={{ padding: "16px 20px 32px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>Ajouter une annonce</div>
+            <button onClick={onClose} style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text3, cursor: "pointer", fontSize: 14, borderRadius: 8, width: 30, height: 30 }}>✕</button>
           </div>
 
           {step === "input" && (
-            <div>
-              <div style={{ fontSize: 11, color: C.text3, marginBottom: 8 }}>Colle l'URL d'une annonce viager</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 12, color: C.text3 }}>Colle une URL pour auto-remplir, ou saisis directement les données</div>
               <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === "Enter" && analyze()}
-                placeholder="https://www.seloger.com/annonces/..."
-                style={{ background: C.card, border: `1px solid ${C.border2}`, borderRadius: 10, color: C.text, padding: "13px 16px", fontSize: 14, width: "100%", marginBottom: 12 }} />
-              <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-                {[["SeLoger", C.blue], ["Renée Costes", C.gold], ["LeBonCoin", C.green], ["PAP", "#a78bfa"]].map(([s, c]) => (
-                  <span key={s as string} style={{ background: `${c}18`, color: c as string, border: `1px solid ${c}30`, borderRadius: 20, padding: "3px 10px", fontSize: 10, fontWeight: 600 }}>{s}</span>
-                ))}
+                placeholder="https://www.costes-viager.com/acheter/..."
+                style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, padding: "13px 16px", fontSize: 14, width: "100%" }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={analyze} disabled={!url.trim()}
+                  style={{ flex: 2, background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700, opacity: url.trim() ? 1 : 0.5 }}>
+                  Analyser l'URL →
+                </button>
+                <button onClick={() => setStep("form")}
+                  style={{ flex: 1, background: C.bg, color: C.text2, border: `1px solid ${C.border}`, borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                  Saisie manuelle
+                </button>
               </div>
-              <button onClick={analyze} disabled={!url.trim()}
-                style={{ background: C.orange, color: C.white, border: "none", borderRadius: 12, padding: "14px 20px", cursor: "pointer", fontSize: 15, fontWeight: 700, width: "100%", opacity: url.trim() ? 1 : 0.4, letterSpacing: ".02em" }}>
-                Analyser →
-              </button>
             </div>
           )}
 
           {step === "loading" && (
             <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <div style={{ fontSize: 36, marginBottom: 14 }}>⏳</div>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>⏳</div>
               <div style={{ fontSize: 15, color: C.text2, fontWeight: 600 }}>Analyse en cours…</div>
-              <div style={{ fontSize: 11, color: C.text3, marginTop: 8 }}>Firecrawl scrape l'annonce · Extraction des données</div>
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 8 }}>Extraction des données depuis l'annonce</div>
             </div>
           )}
 
           {step === "error" && (
-            <div>
-              <div style={{ background: `${C.red}15`, border: `1px solid ${C.red}30`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.red, marginBottom: 4 }}>Erreur d'import</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}30`, borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.red, marginBottom: 4 }}>Scraping impossible</div>
                 <div style={{ fontSize: 11, color: C.text3 }}>{errMsg}</div>
               </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => { setStep("form"); setEdited({ url, source: "Manuel" }); }}
-                  style={{ flex: 1, background: C.card, color: C.text2, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                  Saisie manuelle
-                </button>
-                <button onClick={reset} style={{ flex: 1, background: "none", border: `1px solid ${C.border}`, color: C.text3, borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 13 }}>Réessayer</button>
-              </div>
+              <button onClick={() => setStep("form")}
+                style={{ background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                Saisir manuellement →
+              </button>
+              <button onClick={reset} style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "11px", cursor: "pointer", fontSize: 13 }}>← Réessayer</button>
             </div>
           )}
 
           {step === "form" && (
-            <div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {parsed && (
-                <div style={{ background: `${C.green}12`, border: `1px solid ${C.green}25`, borderRadius: 10, padding: 12, marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: C.green, fontWeight: 700 }}>
-                    ✅ {parsed.source} — {Math.round((parsed.confidence || 0) * 100)}% des champs extraits
-                  </div>
-                  <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>Complète les champs manquants ci-dessous</div>
+                <div style={{ background: `${C.green}15`, border: `1px solid ${C.green}30`, borderRadius: 10, padding: 12, marginBottom: 4 }}>
+                  <div style={{ fontSize: 12, color: C.green, fontWeight: 700 }}>✅ {parsed.source} — {Math.round((parsed.confidence || 0) * 100)}% extrait</div>
+                  <div style={{ fontSize: 10, color: C.text3, marginTop: 2 }}>Vérifie et complète les champs ci-dessous</div>
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                {field("Ville", "ville", "text")}{field("Superficie (m²)", "superficie")}
-                {field("Bouquet (€)", "bouquet")}{field("Rente mensuelle (€)", "rente")}
-                {field("Âge occupant", "occupant1Age")}{field("Valeur vénale (€)", "valeurVenale")}
-                {field("Taxe foncière (€/an)", "taxeFonciere")}{field("Charges copro (€/an)", "chargesCopro")}
+
+              {/* Type de vente */}
+              {btnToggle("Type de vente", [["occupe", "Viager occupé"], ["libre", "Viager libre"], ["terme", "Vente à terme"]], "typeVente")}
+
+              {/* Localisation */}
+              {sectionTitle("Localisation")}
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 8 }}>
+                {txtField("Ville", "ville", "Nice")}
+                {txtField("Code postal", "codePostal", "06000")}
               </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={add} style={{ flex: 1, background: C.orange, color: C.white, border: "none", borderRadius: 12, padding: "14px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
-                  Ajouter au portefeuille
+
+              {/* Financier */}
+              {sectionTitle("Données financières")}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {numField("Bouquet (€)", "bouquet", "50 000")}
+                {edited?.typeVente === "terme"
+                  ? numField("Mensualité (€/mois)", "mensualite", "1 200")
+                  : numField("Rente mensuelle (€)", "rente", "400")}
+                {numField("Valeur vénale (€)", "valeurVenale", "200 000")}
+                {numField("Superficie (m²)", "superficie", "50")}
+                {edited?.typeVente === "terme" && numField("Terme (mois)", "termeMois", "180")}
+                {edited?.typeVente === "libre" && numField("Loyer mensuel perçu (€)", "loyerMensuelManuel", "800")}
+              </div>
+
+              {/* Occupant */}
+              {edited?.typeVente !== "terme" && (<>
+                {sectionTitle("Occupant(s)")}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {numField("Âge occupant 1", "occupant1Age", "78")}
+                  <div>{btnToggle("Sexe", [["F", "Femme"], ["H", "Homme"]], "occupant1Sexe")}</div>
+                  {numField("Âge occupant 2 (couple)", "occupant2Age", "")}
+                  {edited?.occupant2Age && <div>{btnToggle("Sexe 2", [["F", "Femme"], ["H", "Homme"]], "occupant2Sexe")}</div>}
+                </div>
+              </>)}
+
+              {/* Charges */}
+              {sectionTitle("Charges annuelles")}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {numField("Taxe foncière (€/an)", "taxeFonciere", "800")}
+                {numField("Charges copro (€/an)", "chargesCopro", "1 200")}
+              </div>
+
+              {/* Source */}
+              {sectionTitle("Source")}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["Renée Costes", "SeLoger", "LeBonCoin", "Univers Viager", "PAP", "Manuel"].map(s => (
+                  <button key={s} onClick={() => upd("source", s)}
+                    style={{ background: edited?.source === s ? `${C.orange}15` : C.bg, color: edited?.source === s ? C.orange : C.text3, border: `1px solid ${edited?.source === s ? C.orange + "40" : C.border}`, borderRadius: 20, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: edited?.source === s ? 700 : 400 }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+
+              {/* URL optionnel */}
+              {!url.trim() && txtField("URL de l'annonce (optionnel)", "url", "https://...")}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={add}
+                  style={{ flex: 1, background: C.orange, color: C.white, border: "none", borderRadius: 10, padding: "14px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                  ✓ Ajouter au portefeuille
                 </button>
-                <button onClick={reset} style={{ background: C.card, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", cursor: "pointer", fontSize: 13 }}>←</button>
+                <button onClick={reset} style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 14px", cursor: "pointer", fontSize: 13 }}>←</button>
               </div>
             </div>
           )}
@@ -763,135 +851,6 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
   );
 }
 
-// ─── Card ──────────────────────────────────────────────────────────────────
-// Extrait dept/région depuis l'URL Renée Costes ou code postal
-function getVilleLabel(offre: any): string {
-  const ville = offre.ville || "Ville inconnue";
-  const cp = offre.codePostal;
-  if (cp) {
-    const dept = cp.slice(0, 2);
-    return `${ville} (${dept})`;
-  }
-  // Extraire depuis URL Renée Costes: /acheter/paris-75/paris-18e...
-  if (offre.url) {
-    const m = offre.url.match(/\/acheter\/[^/]+-(\d{2,3})\//);
-    if (m) return `${ville} (${m[1]})`;
-  }
-  return ville;
-}
-
-function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori }: any) {
-  const { prixNet, ratio, duree, coutMensuelOcc, negoLabel, negoColor, negoScore, hasPriceDrop, ageJours } = result;
-  const col = scoreColor(ratio);
-  const villeLabel = getVilleLabel(offre);
-  const pubDate = offre.datePublication || offre.createdAt;
-
-  return (
-    <div style={{ background: C.surface, borderRadius: 12, overflow: "hidden", border: `1px solid ${isFavori ? C.gold + "80" : C.border}`, cursor: "pointer", transition: "all .2s", boxShadow: C.shadow }}
-      onMouseEnter={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadowHover; el.style.borderColor = isFavori ? C.gold : C.orange + "60"; el.style.transform = "translateY(-2px)"; }}
-      onMouseLeave={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadow; el.style.borderColor = isFavori ? C.gold + "80" : C.border; el.style.transform = "translateY(0)"; }}
-      onClick={() => onDetail(offre)}>
-
-      <div style={{ height: 2, background: `linear-gradient(90deg, ${col}, ${col}44)` }} />
-
-      <div style={{ padding: 16 }}>
-        {/* Top row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {isFavori && <span style={{ color: C.gold, marginRight: 5 }}>⭐</span>}
-              {villeLabel}
-            </div>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontSize: 10, color: offre.source === "Renée Costes" ? C.gold : C.orange }}>{offre.source}</span>
-              {offre.typeVente === "terme" && <Badge color={C.blue}>À terme</Badge>}
-              {offre.typeVente === "libre" && <Badge color={C.yellow}>Libre</Badge>}
-              {hasPriceDrop && <Badge color={C.green}>↓ Prix</Badge>}
-              {negoScore >= 2 && <Badge color={negoColor}>{negoLabel}</Badge>}
-            </div>
-            {/* Date de publication visible */}
-            {pubDate && (
-              <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>
-                📅 {fmtDate(pubDate)}{ageJours > 0 ? ` · ${fmtAge(ageJours)}` : ""}
-              </div>
-            )}
-          </div>
-          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
-            <div style={{ fontSize: 24, fontWeight: 900, color: col, lineHeight: 1 }}>{fmtPct(ratio)}</div>
-            <div style={{ fontSize: 9, color: col, fontWeight: 700, textTransform: "uppercase", marginTop: 2 }}>{scoreLabel(ratio)}</div>
-          </div>
-        </div>
-
-        {/* Métriques principales */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Coût / mois</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>-{fmt(Math.round(coutMensuelOcc))}</div>
-            <div style={{ fontSize: 9, color: C.text3 }}>rente + TF + charges</div>
-          </div>
-          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Prix revient</div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: col }}>{fmt(prixNet)}</div>
-            <div style={{ fontSize: 9, color: C.text3 }}>sur {fmtYrs(duree)}</div>
-          </div>
-        </div>
-
-        {/* Secondaires */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
-          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
-            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Bouquet</div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{fmt(offre.bouquet)}</div>
-          </div>
-          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
-            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>{offre.typeVente === "terme" ? "Mensualité" : "Rente"}</div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{(offre.rente || offre.mensualite) ? fmt(offre.rente || offre.mensualite) + "/m" : "—"}</div>
-          </div>
-          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
-            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Durée</div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>
-              {fmtYrs(duree)}
-              {offre.occupant1Age && (
-                <span style={{ fontSize: 9, marginLeft: 3, color: offre.occupant1Sexe === "H" && !offre.occupant2Age ? "#60a5fa" : offre.occupant1Sexe === "F" && !offre.occupant2Age ? "#f9a8d4" : C.text3 }}>
-                  ({offre.occupant1Age}a{offre.occupant2Age ? `/${offre.occupant2Age}a` : ""})
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={e => { e.stopPropagation(); onDetail(offre); }}
-            style={{ flex: 1, background: `${C.orange}15`, color: C.orange, border: `1px solid ${C.orange}25`, borderRadius: 10, padding: "9px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            Détail
-          </button>
-          <button onClick={e => { e.stopPropagation(); onFavori(offre.id); }}
-            style={{ background: isFavori ? `${C.gold}20` : C.surface, color: isFavori ? C.gold : C.text3, border: `1px solid ${isFavori ? C.gold + "40" : C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 13, cursor: "pointer" }}>
-            ⭐
-          </button>
-          {offre.url && (
-            <a href={offre.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
-              style={{ background: C.surface, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, textDecoration: "none" }}>
-              🔗
-            </a>
-          )}
-          <button onClick={e => { e.stopPropagation(); onSignal(offre); }}
-            title="Signaler une anomalie"
-            style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
-            ?
-          </button>
-          <button onClick={e => { e.stopPropagation(); onRejeter(offre.id); }}
-            title="Rejeter"
-            style={{ background: C.bg, color: C.red, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer" }}>
-            ✕
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── App ──────────────────────────────────────────────────────────────────
 function SignalModal({ offre, onClose, onCorrect }: { offre: any; onClose: () => void; onCorrect: (id: any, corrections: any) => void }) {
   const [step, setStep] = useState<"main"|"correct"|"done">("main");
   const [corrections, setCorrections] = useState<any>({
@@ -1037,15 +996,31 @@ export default function ViagerScan() {
   const [signal, setSignal] = useState<{offre: any, field?: string} | null>(null);
   const [showHypo, setShowHypo] = useState(false);
   const [hypo, setHypo] = useState({ inflation: 3, croissanceTF: 4, appreciationBien: 0 });
-  const [favoris, setFavoris] = useState<Set<any>>(new Set());
-  const [rejetes, setRejetes] = useState<Set<any>>(new Set());
+  const [favoris, setFavoris] = useState<Set<any>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("viager_favoris") || "[]")); } catch { return new Set(); }
+  });
+  const [rejetes, setRejetes] = useState<Set<any>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("viager_rejetes") || "[]")); } catch { return new Set(); }
+  });
   const [anomalies, setAnomalies] = useState<Set<any>>(new Set());
   const [activeTab, setActiveTab] = useState<"all"|"favoris"|"anomalies">("all");
 
-  const toggleFavori = (id: any) => setFavoris(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleFavori = (id: any) => setFavoris(p => {
+    const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id);
+    try { localStorage.setItem("viager_favoris", JSON.stringify(Array.from(n))); } catch {}
+    return n;
+  });
   const toggleRejete = (id: any) => {
-    setRejetes(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-    setFavoris(p => { const n = new Set(p); n.delete(id); return n; });
+    setRejetes(p => {
+      const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id);
+      try { localStorage.setItem("viager_rejetes", JSON.stringify(Array.from(n))); } catch {}
+      return n;
+    });
+    setFavoris(p => {
+      const n = new Set(p); n.delete(id);
+      try { localStorage.setItem("viager_favoris", JSON.stringify(Array.from(n))); } catch {}
+      return n;
+    });
   };
 
   // Détection automatique anomalies
