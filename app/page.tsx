@@ -256,9 +256,15 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
   const e2 = offre.occupant2Age ? getEsp(offre.occupant2Age, offre.occupant2Sexe || "F") : 0;
   const dureeMax = Math.max(e1, e2);
   const [libAns, setLibAns] = useState(Math.round(dureeMax * 0.5));
+  const [loyerScenario, setLoyerScenario] = useState<number | null>(null); // loyer personnalisé
+  const [vvDecote, setVvDecote] = useState(0); // décote valeur vénale en %
 
-  const resBase = useMemo(() => computeViager(offre), [offre]);
-  const resLib = useMemo(() => libEnabled ? computeViager(offre, libAns) : null, [offre, libEnabled, libAns]);
+  // Valeur vénale avec décote appliquée
+  const vvAjustee = offre.valeurVenale ? Math.round(offre.valeurVenale * (1 - vvDecote / 100)) : offre.valeurVenale;
+  const offreAjustee = { ...offre, valeurVenale: vvAjustee, loyerMensuelManuel: loyerScenario ?? offre.loyerMensuelManuel };
+
+  const resBase = useMemo(() => computeViager(offreAjustee), [offreAjustee]);
+  const resLib = useMemo(() => libEnabled ? computeViager(offreAjustee, libAns) : null, [offreAjustee, libEnabled, libAns]);
   const res = resLib || resBase;
   const col = scoreColor(res.ratio);
 
@@ -464,6 +470,80 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
           {/* ── LIBÉRATION ── */}
           {tab === "liberation" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Scénarios valeur vénale */}
+              <div style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 4 }}>Décote valeur vénale</div>
+                <div style={{ fontSize: 10, color: C.text3, marginBottom: 10 }}>Les agents surestiment souvent le bien — teste différents scénarios</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  {[0, 2, 5, 7, 10, 12, 15].map(pct => (
+                    <button key={pct} onClick={() => setVvDecote(pct)}
+                      style={{ background: vvDecote === pct ? `${C.orange}15` : C.bg, color: vvDecote === pct ? C.orange : C.text3, border: `1px solid ${vvDecote === pct ? C.orange + "40" : C.border}`, borderRadius: 20, padding: "5px 12px", cursor: "pointer", fontSize: 11, fontWeight: vvDecote === pct ? 700 : 400 }}>
+                      -{pct}%
+                    </button>
+                  ))}
+                </div>
+                {vvDecote > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    <div style={{ background: C.bg, borderRadius: 8, padding: "8px 10px", border: `1px solid ${C.border}` }}>
+                      <div style={{ fontSize: 9, color: C.text3 }}>VV estimée</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.text3, textDecoration: "line-through" }}>{fmt(offre.valeurVenale)}</div>
+                    </div>
+                    <div style={{ background: C.bg, borderRadius: 8, padding: "8px 10px", border: `1px solid ${C.orange}40` }}>
+                      <div style={{ fontSize: 9, color: C.text3 }}>VV ajustée -{vvDecote}%</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.orange }}>{fmt(vvAjustee)}</div>
+                    </div>
+                    <div style={{ background: C.bg, borderRadius: 8, padding: "8px 10px", border: `1px solid ${scoreColor(resBase.ratio)}40` }}>
+                      <div style={{ fontSize: 9, color: C.text3 }}>Nouveau ratio</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: scoreColor(resBase.ratio) }}>{fmtPct(resBase.ratio)}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Loyer scenario */}
+              <div style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 4 }}>Loyer mensuel — scénario</div>
+                <div style={{ fontSize: 10, color: C.text3, marginBottom: 10 }}>Ajuste le loyer estimé pour sensibiliser le cash flow post-libération</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <input type="range" min={300} max={3000} step={50}
+                    value={loyerScenario ?? (resBase.loyerMensuelEffectif || 800)}
+                    onChange={e => setLoyerScenario(+e.target.value)}
+                    style={{ flex: 1, accentColor: C.green }} />
+                  <div style={{ background: C.bg, borderRadius: 10, padding: "8px 14px", border: `1px solid ${C.green}40`, minWidth: 80, textAlign: "center" }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.green }}>{fmt(loyerScenario ?? resBase.loyerMensuelEffectif)}</div>
+                    <div style={{ fontSize: 9, color: C.text3 }}>/mois</div>
+                  </div>
+                </div>
+                {loyerScenario && (
+                  <button onClick={() => setLoyerScenario(null)} style={{ marginTop: 8, background: "none", border: "none", color: C.text3, fontSize: 11, cursor: "pointer" }}>
+                    ↺ Revenir au loyer estimé ({fmt(resBase.loyerMensuelEffectif)}/m)
+                  </button>
+                )}
+              </div>
+
+              {/* Prix au m² vs marché */}
+              {offre.superficie && offre.valeurVenale && (
+                <div style={{ background: C.card, borderRadius: 12, padding: 16, border: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 10 }}>Prix au m² — analyse</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px" }}>
+                      <div style={{ fontSize: 9, color: C.text3 }}>VV estimée / m²</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{Math.round(offre.valeurVenale / offre.superficie).toLocaleString("fr-FR")} €</div>
+                    </div>
+                    {vvDecote > 0 && (
+                      <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.orange}40` }}>
+                        <div style={{ fontSize: 9, color: C.text3 }}>VV ajustée -{vvDecote}% / m²</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: C.orange }}>{Math.round(vvAjustee! / offre.superficie).toLocaleString("fr-FR")} €</div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.text3, marginTop: 10, padding: "8px 10px", background: C.bg, borderRadius: 8 }}>
+                    💡 Compare sur <a href={`https://www.meilleursagents.com/prix-immobilier/${(offre.ville || "").toLowerCase().replace(/\s+/g, "-")}-${offre.codePostal || ""}/`} target="_blank" rel="noreferrer" style={{ color: C.blue }}>MeilleursAgents</a> ou <a href={`https://www.seloger.com/prix-de-l-immo/${(offre.ville || "").toLowerCase().replace(/\s+/g, "-")}.htm`} target="_blank" rel="noreferrer" style={{ color: C.blue }}>SeLoger prix</a>
+                  </div>
+                </div>
+              )}
+
               <div style={{ background: C.card, borderRadius: 12, padding: 18, border: `1px solid ${C.border}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: libEnabled ? 18 : 0 }}>
                   <div>
@@ -496,7 +576,7 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
                       {[
                         ["Majoration rente", `+${((offre.majorationRenteLiberation || 0.30) * 100).toFixed(0)}%`, C.yellow],
                         ["Charges", "100% acquéreur", C.yellow],
-                        ["Loyer estimé", `${fmt(resLib?.loyerMensuelEffectif || 0)}/m`, C.green],
+                        ["Loyer scénario", `${fmt(loyerScenario ?? resLib?.loyerMensuelEffectif || 0)}/m`, C.green],
                       ].map(([k, v, c]) => (
                         <div key={k as string} style={{ background: C.surface, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
                           <div style={{ fontSize: 9, color: C.text3, marginBottom: 3 }}>{k}</div>
@@ -935,6 +1015,22 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
                 </div>
               </>)}
 
+              {/* Revalorisation rente */}
+              {edited?.typeVente !== "terme" && (<>
+                {sectionTitle("Revalorisation de la rente")}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>Indice de revalorisation (%/an)</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {[[0, "0% — Fixe"], [1, "1% — ICC bas"], [1.5, "1.5%"], [2, "2% — ICC moy."], [3, "3% — IRL"]].map(([v, l]) => (
+                      <button key={String(v)} onClick={() => upd("tauxRevalorisationRente", v)}
+                        style={{ background: (edited?.tauxRevalorisationRente ?? 1) === v ? `${C.orange}15` : C.bg, color: (edited?.tauxRevalorisationRente ?? 1) === v ? C.orange : C.text3, border: `1px solid ${(edited?.tauxRevalorisationRente ?? 1) === v ? C.orange + "40" : C.border}`, borderRadius: 20, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontWeight: (edited?.tauxRevalorisationRente ?? 1) === v ? 700 : 400 }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>)}
+
               {/* Charges */}
               {sectionTitle("Charges annuelles")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -1143,6 +1239,16 @@ export default function ViagerScan() {
     });
   };
 
+  // IDs/URLs rejetés persistés pour filtrer les nouveaux syncs
+  const getRejectedUrls = (): Set<string> => {
+    try {
+      const ids = JSON.parse(localStorage.getItem("viager_rejetes") || "[]");
+      const urls = new Set<string>();
+      offres.forEach((o: any) => { if (ids.includes(o.id)) urls.add(o.url); });
+      return urls;
+    } catch { return new Set(); }
+  };
+
   // Détection automatique anomalies
   const isAnomalie = (result: any, offre: any): boolean => {
     if (result.ratio !== null && (result.ratio > 3 || result.ratio < 0.1)) return true;
@@ -1166,7 +1272,8 @@ export default function ViagerScan() {
       .then(r => r.json())
       .then(json => {
         if (json.success && json.listings.length > 0) {
-          const mapped = json.listings.map((l: any) => ({
+          const rejectedUrls = getRejectedUrls();
+        const mapped = json.listings.map((l: any) => ({
             id: `db-${l.id}`,
             source: l.source,
             ville: l.ville || "Ville inconnue",
@@ -1190,7 +1297,7 @@ export default function ViagerScan() {
           }));
           setOffres(prev => {
             const existingUrls = new Set(prev.map((o: any) => o.url));
-            const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url));
+            const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
             return [...prev, ...newOnes];
           });
           setDbLoaded(true);
@@ -1232,7 +1339,7 @@ export default function ViagerScan() {
         }));
         setOffres(prev => {
           const existingUrls = new Set(prev.map((o: any) => o.url));
-          const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url));
+          const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
           return [...prev, ...newOnes];
         });
       }
