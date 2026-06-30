@@ -635,6 +635,126 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
 }
 
 // ─── Import Modal ──────────────────────────────────────────────────────────
+// Extrait dept/région depuis l'URL ou code postal
+function getVilleLabel(offre: any): string {
+  const ville = offre.ville || "Ville inconnue";
+  const cp = offre.codePostal;
+  if (cp) return `${ville} (${cp.slice(0,2)})`;
+  if (offre.url) {
+    const m = offre.url.match(/\/acheter\/[^/]+-(\d{2,3})\//);
+    if (m) return `${ville} (${m[1]})`;
+  }
+  return ville;
+}
+
+function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori }: any) {
+  const { prixNet, ratio, duree, coutMensuelOcc, negoLabel, negoColor, negoScore, hasPriceDrop, ageJours } = result;
+  const col = scoreColor(ratio);
+  const villeLabel = getVilleLabel(offre);
+  const pubDate = offre.datePublication || offre.createdAt;
+
+  return (
+    <div style={{ background: C.surface, borderRadius: 12, overflow: "hidden", border: `1px solid ${isFavori ? C.gold + "80" : C.border}`, cursor: "pointer", transition: "all .2s", boxShadow: C.shadow }}
+      onMouseEnter={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadowHover; el.style.borderColor = isFavori ? C.gold : C.orange + "60"; el.style.transform = "translateY(-2px)"; }}
+      onMouseLeave={e => { const el = e.currentTarget as any; el.style.boxShadow = C.shadow; el.style.borderColor = isFavori ? C.gold + "80" : C.border; el.style.transform = "translateY(0)"; }}
+      onClick={() => onDetail(offre)}>
+
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${col}, ${col}44)` }} />
+
+      <div style={{ padding: 16 }}>
+        {/* Top row */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {isFavori && <span style={{ color: C.gold, marginRight: 4 }}>⭐</span>}
+              {villeLabel}
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 10, color: offre.source === "Renée Costes" ? C.gold : C.orange }}>{offre.source}</span>
+              {offre.typeVente === "terme" && <Badge color={C.blue}>À terme</Badge>}
+              {offre.typeVente === "libre" && <Badge color={C.yellow}>Libre</Badge>}
+              {hasPriceDrop && <Badge color={C.green}>↓ Prix</Badge>}
+              {negoScore >= 2 && <Badge color={negoColor}>{negoLabel}</Badge>}
+            </div>
+            {pubDate && (
+              <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>
+                📅 {fmtDate(pubDate)}{ageJours > 0 ? ` · ${fmtAge(ageJours)}` : ""}
+              </div>
+            )}
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: col, lineHeight: 1 }}>{fmtPct(ratio)}</div>
+            <div style={{ fontSize: 9, color: col, fontWeight: 700, textTransform: "uppercase", marginTop: 2 }}>{scoreLabel(ratio)}</div>
+          </div>
+        </div>
+
+        {/* Métriques */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Coût / mois</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: C.red }}>-{fmt(Math.round(coutMensuelOcc))}</div>
+            <div style={{ fontSize: 9, color: C.text3 }}>rente + TF + charges</div>
+          </div>
+          <div style={{ background: C.bg, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 9, color: C.text3, textTransform: "uppercase", marginBottom: 4 }}>Prix revient</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: col }}>{fmt(prixNet)}</div>
+            <div style={{ fontSize: 9, color: C.text3 }}>sur {fmtYrs(duree)}</div>
+          </div>
+        </div>
+
+        {/* Secondaires */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Bouquet</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{fmt(offre.bouquet)}</div>
+          </div>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>{offre.typeVente === "terme" ? "Mensualité" : "Rente"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>{(offre.rente || offre.mensualite) ? fmt(offre.rente || offre.mensualite) + "/m" : "—"}</div>
+          </div>
+          <div style={{ background: C.bg, borderRadius: 6, padding: "7px 8px" }}>
+            <div style={{ fontSize: 8, color: C.text3, textTransform: "uppercase" }}>Durée</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: C.text2, marginTop: 1 }}>
+              {fmtYrs(duree)}
+              {offre.occupant1Age && (
+                <span style={{ fontSize: 9, marginLeft: 3, color: offre.occupant1Sexe === "H" && !offre.occupant2Age ? "#60a5fa" : offre.occupant1Sexe === "F" && !offre.occupant2Age ? "#f9a8d4" : C.text3 }}>
+                  ({offre.occupant1Age}a{offre.occupant2Age ? `/${offre.occupant2Age}a` : ""})
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={e => { e.stopPropagation(); onDetail(offre); }}
+            style={{ flex: 1, background: `${C.orange}15`, color: C.orange, border: `1px solid ${C.orange}25`, borderRadius: 10, padding: "9px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+            Détail
+          </button>
+          <button onClick={e => { e.stopPropagation(); onFavori(offre.id); }}
+            style={{ background: isFavori ? `${C.gold}20` : C.bg, color: isFavori ? C.gold : C.text3, border: `1px solid ${isFavori ? C.gold + "40" : C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 13, cursor: "pointer" }}>
+            ⭐
+          </button>
+          {offre.url && (
+            <a href={offre.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+              style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, textDecoration: "none" }}>
+              🔗
+            </a>
+          )}
+          <button onClick={e => { e.stopPropagation(); onSignal(offre); }}
+            style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+            ?
+          </button>
+          <button onClick={e => { e.stopPropagation(); onRejeter(offre.id); }}
+            style={{ background: C.bg, color: C.red, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 12, cursor: "pointer" }}>
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o: any) => void }) {
   const [url, setUrl] = useState("");
   const [step, setStep] = useState("input");
