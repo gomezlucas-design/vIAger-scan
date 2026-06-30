@@ -576,7 +576,8 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
                       {[
                         ["Majoration rente", `+${((offre.majorationRenteLiberation || 0.30) * 100).toFixed(0)}%`, C.yellow],
                         ["Charges", "100% acquéreur", C.yellow],
-                        ["Loyer scénario", `${fmt(loyerScenario ?? resLib?.loyerMensuelEffectif || 0)}/m`, C.green],
+                        ["Loyer scénario", `${fmt(loyerScenario ?? (resLib?.loyerMensuelEffectif || 0))}/m`, C.green],
+
                       ].map(([k, v, c]) => (
                         <div key={k as string} style={{ background: C.surface, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
                           <div style={{ fontSize: 9, color: C.text3, marginBottom: 3 }}>{k}</div>
