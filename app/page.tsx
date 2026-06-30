@@ -1338,6 +1338,13 @@ export default function ViagerScan() {
           note: l.notes || "",
           priceHistory: [{ date: l.createdAt?.slice(0, 10), bouquet: l.bouquet, rente: l.rente }],
         }));
+             const rejectedUrls = getRejectedUrls();
+        setOffres(prev => {
+          const existingUrls = new Set(prev.map((o: any) => o.url));
+          const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
+          return [...prev, ...newOnes];
+        });
+
         setOffres(prev => {
           const existingUrls = new Set(prev.map((o: any) => o.url));
           const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
