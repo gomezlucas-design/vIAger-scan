@@ -256,12 +256,13 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
   const e2 = offre.occupant2Age ? getEsp(offre.occupant2Age, offre.occupant2Sexe || "F") : 0;
   const dureeMax = Math.max(e1, e2);
   const [libAns, setLibAns] = useState(Math.round(dureeMax * 0.5));
+  const [majorationPct, setMajorationPct] = useState(Math.round((offre.majorationRenteLiberation ?? 0.30) * 100));
   const [loyerScenario, setLoyerScenario] = useState<number | null>(null); // loyer personnalisé
   const [vvDecote, setVvDecote] = useState(0); // décote valeur vénale en %
 
   // Valeur vénale avec décote appliquée
   const vvAjustee = offre.valeurVenale ? Math.round(offre.valeurVenale * (1 - vvDecote / 100)) : offre.valeurVenale;
-  const offreAjustee = { ...offre, valeurVenale: vvAjustee, loyerMensuelManuel: loyerScenario ?? offre.loyerMensuelManuel };
+  const offreAjustee = { ...offre, valeurVenale: vvAjustee, loyerMensuelManuel: loyerScenario ?? offre.loyerMensuelManuel, majorationRenteLiberation: majorationPct / 100 };
 
   const resBase = useMemo(() => computeViager(offreAjustee), [offreAjustee]);
   const resLib = useMemo(() => libEnabled ? computeViager(offreAjustee, libAns) : null, [offreAjustee, libEnabled, libAns]);
@@ -572,12 +573,25 @@ function DetailPanel({ offre, onClose }: { offre: any; onClose: () => void }) {
                         <div style={{ fontSize: 9, color: C.text3 }}>ans</div>
                       </div>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+
+                    {/* Curseur majoration rente */}
+                    <div style={{ background: C.surface, borderRadius: 10, padding: 14, border: `1px solid ${C.border}`, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, color: C.text2, fontWeight: 600 }}>Majoration rente au départ</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.yellow }}>+{majorationPct}%</div>
+                      </div>
+                      <input type="range" min={25} max={50} step={1}
+                        value={majorationPct} onChange={e => setMajorationPct(+e.target.value)}
+                        style={{ width: "100%", accentColor: C.yellow }} />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.text3, marginTop: 2 }}>
+                        <span>25%</span><span>défaut 30%</span><span>50%</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
                       {[
-                        ["Majoration rente", `+${((offre.majorationRenteLiberation || 0.30) * 100).toFixed(0)}%`, C.yellow],
                         ["Charges", "100% acquéreur", C.yellow],
                         ["Loyer scénario", `${fmt(loyerScenario ?? (resLib?.loyerMensuelEffectif || 0))}/m`, C.green],
-
                       ].map(([k, v, c]) => (
                         <div key={k as string} style={{ background: C.surface, borderRadius: 8, padding: "10px 12px", border: `1px solid ${C.border}` }}>
                           <div style={{ fontSize: 9, color: C.text3, marginBottom: 3 }}>{k}</div>
@@ -1017,20 +1031,6 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
               </>)}
 
               {/* Revalorisation rente */}
-              {edited?.typeVente !== "terme" && (<>
-                {sectionTitle("Revalorisation de la rente")}
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={{ fontSize: 10, color: C.text3, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>Indice de revalorisation (%/an)</label>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {[[0, "0% — Fixe"], [1, "1% — ICC bas"], [1.5, "1.5%"], [2, "2% — ICC moy."], [3, "3% — IRL"]].map(([v, l]) => (
-                      <button key={String(v)} onClick={() => upd("tauxRevalorisationRente", v)}
-                        style={{ background: (edited?.tauxRevalorisationRente ?? 1) === v ? `${C.orange}15` : C.bg, color: (edited?.tauxRevalorisationRente ?? 1) === v ? C.orange : C.text3, border: `1px solid ${(edited?.tauxRevalorisationRente ?? 1) === v ? C.orange + "40" : C.border}`, borderRadius: 20, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontWeight: (edited?.tauxRevalorisationRente ?? 1) === v ? 700 : 400 }}>
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>)}
 
               {/* Charges */}
               {sectionTitle("Charges annuelles")}
@@ -1338,13 +1338,7 @@ export default function ViagerScan() {
           note: l.notes || "",
           priceHistory: [{ date: l.createdAt?.slice(0, 10), bouquet: l.bouquet, rente: l.rente }],
         }));
-             const rejectedUrls = getRejectedUrls();
-        setOffres(prev => {
-          const existingUrls = new Set(prev.map((o: any) => o.url));
-          const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
-          return [...prev, ...newOnes];
-        });
-
+        const rejectedUrls = getRejectedUrls();
         setOffres(prev => {
           const existingUrls = new Set(prev.map((o: any) => o.url));
           const newOnes = mapped.filter((o: any) => !existingUrls.has(o.url) && !rejectedUrls.has(o.url));
