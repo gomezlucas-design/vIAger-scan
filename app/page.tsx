@@ -851,9 +851,52 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori
 }
 
 // ─── Parser texte collé — extraction côté client ──────────────────────────
+// ─── Vocabulaire personnalisable — synonymes par champ ────────────────────
+const DEFAULT_VOCAB = {
+  bouquet: ["bouquet", "capital initial", "comptant"],
+  rente: ["rente", "rente mensuelle", "rente viagère"],
+  mensualite: ["mensualité", "mensualités", "échéance"],
+  valeurVenale: ["valeur vénale", "valeur du bien", "prix du bien", "prix marché", "estimé", "estimation"],
+  taxeFonciere: ["taxe foncière", "tf"],
+  chargesCopro: ["charges de copropriété", "charges copro", "charges trimestrielles", "charges annuelles"],
+  superficie: ["m²", "superficie", "surface"],
+  loyer: ["loyer", "loyer garanti", "loyer estimé"],
+  viagerLibre: ["viager libre", "bien libre", "libre de toute occupation", "nue-propriété"],
+  venteATerme: ["vente à terme", "terme libre", "terme occupé"],
+};
+
+function getVocab(): typeof DEFAULT_VOCAB {
+  try {
+    const stored = localStorage.getItem("viager_vocab");
+    if (!stored) return DEFAULT_VOCAB;
+    const parsed = JSON.parse(stored);
+    // Fusionner avec les défauts pour ne jamais perdre les patterns de base
+    const merged: any = {};
+    Object.keys(DEFAULT_VOCAB).forEach(k => {
+      merged[k] = Array.from(new Set([...(DEFAULT_VOCAB as any)[k], ...(parsed[k] || [])]));
+    });
+    return merged;
+  } catch { return DEFAULT_VOCAB; }
+}
+
+function saveVocabTerm(field: keyof typeof DEFAULT_VOCAB, term: string) {
+  try {
+    const stored = JSON.parse(localStorage.getItem("viager_vocab") || "{}");
+    const list = new Set(stored[field] || []);
+    list.add(term.toLowerCase().trim());
+    stored[field] = Array.from(list);
+    localStorage.setItem("viager_vocab", JSON.stringify(stored));
+  } catch {}
+}
+
+function buildVocabRegex(terms: string[]): string {
+  return terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+}
+
 function parsePastedText(text: string): { data: any; confidence: number } {
   const clean = text.replace(/\s+/g, " ").trim();
   const data: any = {};
+  const vocab = getVocab();
 
   const extractNum = (regex: RegExp, min: number, max: number): number | undefined => {
     const m = clean.match(regex);
@@ -862,36 +905,39 @@ function parsePastedText(text: string): { data: any; confidence: number } {
     return !isNaN(val) && val >= min && val <= max ? val : undefined;
   };
 
-  // Type de vente
+  // Type de vente — vocabulaire dynamique
   const t = clean.toLowerCase();
-  if (/vente\s+[aà]\s+terme|terme\s+(?:libre|occup[eé])|mensualit[eé]s?\s*:?\s*\d|\b(?:120|150|180|240)\s*mois\b/i.test(t)) {
+  const venteATermeRe = new RegExp(`(?:${buildVocabRegex(vocab.venteATerme)})|mensualit[eé]s?\\s*:?\\s*\\d|\\b(?:120|150|180|240)\\s*mois\\b`, "i");
+  const libreRe = new RegExp(`(?:${buildVocabRegex(vocab.viagerLibre)})`, "i");
+  if (venteATermeRe.test(t)) {
     data.typeVente = "terme";
-  } else if (/viager\s+libre|bien\s+libre|libre\s+de\s+toute|nue[\s-]?propri[eé]t[eé]/i.test(t)) {
+  } else if (libreRe.test(t)) {
     data.typeVente = "libre";
   } else {
     data.typeVente = "occupe";
   }
 
-  // Bouquet
-  data.bouquet = extractNum(/bouquet\s*(?:FAI)?[^\d€]{0,10}([0-9][0-9\s]{2,8})\s*€?/i, 1000, 500000)
+  // Bouquet — vocabulaire dynamique
+  const bouquetRe = new RegExp(`(?:${buildVocabRegex(vocab.bouquet)})\\s*(?:FAI)?[^\\d€]{0,10}([0-9][0-9\\s]{2,8})\\s*€?`, "i");
+  data.bouquet = extractNum(bouquetRe, 1000, 500000)
     ?? extractNum(/([0-9][0-9\s]{4,8})\s*€?\s*(?:FAI|hono)/i, 1000, 500000);
 
   if (data.typeVente === "terme") {
-    data.mensualite = extractNum(/mensualit[eé]s?\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 10000)
+    const mensRe = new RegExp(`(?:${buildVocabRegex(vocab.mensualite)})\\s*:?\\s*([0-9][0-9\\s]{2,6})\\s*€?\\s*\\/?\\s*mois`, "i");
+    data.mensualite = extractNum(mensRe, 100, 10000)
       ?? extractNum(/([0-9][0-9\s]{2,6})\s*€?\s*\/\s*mois/i, 100, 10000);
     if (data.mensualite) data.rente = data.mensualite;
     data.termeMois = extractNum(/terme\s*:?\s*([0-9]{2,4})\s*mois/i, 12, 360)
       ?? extractNum(/([0-9]{2,4})\s*mois/i, 12, 360);
     data.valeurVenale = extractNum(/prix\s*(?:d.achat|total|FAI)[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 3000000);
-    data.loyerMensuelManuel = extractNum(/loyer\s*garanti\s*:?\s*([0-9][0-9\s]{2,6})\s*€?/i, 100, 15000)
-      ?? extractNum(/loyer\s*:?\s*([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 100, 15000);
+    const loyerRe = new RegExp(`(?:${buildVocabRegex(vocab.loyer)})\\s*:?\\s*([0-9][0-9\\s]{2,6})\\s*€?`, "i");
+    data.loyerMensuelManuel = extractNum(loyerRe, 100, 15000);
   } else {
-    data.rente = extractNum(/rente[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/?\s*mois/i, 50, 5000)
+    const renteRe = new RegExp(`(?:${buildVocabRegex(vocab.rente)})[^\\d€]{0,10}([0-9][0-9\\s]{2,6})\\s*€?\\s*\\/?\\s*mois`, "i");
+    data.rente = extractNum(renteRe, 50, 5000)
       ?? extractNum(/([0-9][0-9\s]{2,5})\s*€\s*\/\s*mois/i, 50, 5000);
-    data.valeurVenale = extractNum(/valeur\s*v[eé]nale[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
-      ?? extractNum(/valeur\s*du\s*bien[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
-      ?? extractNum(/prix\s*(?:du\s*bien|march[eé])[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000)
-      ?? extractNum(/estim[eé][^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i, 10000, 5000000);
+    const vvRe = new RegExp(`(?:${buildVocabRegex(vocab.valeurVenale)})[^\\d€]{0,10}([0-9][0-9\\s]{4,8})\\s*€?`, "i");
+    data.valeurVenale = extractNum(vvRe, 10000, 5000000);
 
     const ageMatch = clean.match(/(?:dame|femme|homme|monsieur|vendeur|occup[eé])[^\d]{0,15}(\d{2})\s*ans/i)
       ?? clean.match(/(\d{2})\s*ans?\s*(?:dame|femme|homme)/i)
@@ -916,9 +962,8 @@ function parsePastedText(text: string): { data: any; confidence: number } {
   data.taxeFonciere = extractNum(/taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
     ?? extractNum(/TF\s*(?:hors\s*TEOM)?[^\d€]{0,5}([0-9][0-9\s]{2,5})\s*€?/, 100, 10000);
 
-  const chgMatch = clean.match(/charges\s*trimestrielles?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
-    ?? clean.match(/charges\s*de\s*(?:copro|copropri[eé]t[eé])[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
-    ?? clean.match(/charges\s*(?:annuelles?)[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i)
+  const chargesVocabRe = new RegExp(`(?:${buildVocabRegex(vocab.chargesCopro)})[^\\d€]{0,10}([0-9][0-9\\s]{2,6})\\s*€?\\s*(\\/\\s*(?:an|trim|mois))?`, "i");
+  const chgMatch = clean.match(chargesVocabRe)
     ?? clean.match(/charges[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/\s*(?:an|trim|mois)/i);
   if (chgMatch) {
     let val = parseInt(chgMatch[1].replace(/\s/g, ""));
@@ -942,12 +987,99 @@ function parsePastedText(text: string): { data: any; confidence: number } {
   return { data, confidence };
 }
 
+function VocabModal({ onClose }: { onClose: () => void }) {
+  const [vocab, setVocab] = useState(getVocab());
+  const [newTerms, setNewTerms] = useState<Record<string, string>>({});
+
+  const FIELD_LABELS: Record<string, string> = {
+    bouquet: "Bouquet",
+    rente: "Rente (viager occupé/libre)",
+    mensualite: "Mensualité (vente à terme)",
+    valeurVenale: "Valeur vénale",
+    taxeFonciere: "Taxe foncière",
+    chargesCopro: "Charges copropriété",
+    superficie: "Superficie",
+    loyer: "Loyer (libre/terme)",
+    viagerLibre: "Détection viager libre",
+    venteATerme: "Détection vente à terme",
+  };
+
+  const addTerm = (field: string) => {
+    const term = (newTerms[field] || "").trim();
+    if (!term) return;
+    saveVocabTerm(field as any, term);
+    setVocab(getVocab());
+    setNewTerms(p => ({ ...p, [field]: "" }));
+  };
+
+  const removeTerm = (field: string, term: string) => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("viager_vocab") || "{}");
+      stored[field] = (stored[field] || []).filter((t: string) => t !== term);
+      localStorage.setItem("viager_vocab", JSON.stringify(stored));
+      setVocab(getVocab());
+    } catch {}
+  };
+
+  const isDefault = (field: string, term: string) => (DEFAULT_VOCAB as any)[field]?.includes(term);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 250 }} onClick={onClose}>
+      <div style={{ background: C.surface, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 620, maxHeight: "88vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 0" }}>
+          <div style={{ width: 36, height: 4, background: C.border, borderRadius: 2 }} />
+        </div>
+        <div style={{ padding: "16px 20px 32px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>📚 Vocabulaire du parser</div>
+            <button onClick={onClose} style={{ background: C.bg, border: `1px solid ${C.border}`, color: C.text3, cursor: "pointer", fontSize: 14, borderRadius: 8, width: 30, height: 30 }}>✕</button>
+          </div>
+          <div style={{ fontSize: 12, color: C.text3, marginBottom: 20 }}>
+            Ajoute les mots que les sites utilisent pour chaque donnée. Plus le vocabulaire est riche, mieux l'extraction fonctionne.
+          </div>
+
+          {Object.entries(FIELD_LABELS).map(([field, label]) => (
+            <div key={field} style={{ marginBottom: 18, paddingBottom: 18, borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 8 }}>{label}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {((vocab as any)[field] || []).map((term: string) => (
+                  <span key={term} style={{ display: "flex", alignItems: "center", gap: 5, background: isDefault(field, term) ? C.bg : `${C.green}12`, color: isDefault(field, term) ? C.text2 : C.green, border: `1px solid ${isDefault(field, term) ? C.border : C.green + "30"}`, borderRadius: 20, padding: "4px 10px", fontSize: 11 }}>
+                    {term}
+                    {!isDefault(field, term) && (
+                      <button onClick={() => removeTerm(field, term)} style={{ background: "none", border: "none", color: C.green, cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>✕</button>
+                    )}
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={newTerms[field] || ""} onChange={e => setNewTerms(p => ({ ...p, [field]: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && addTerm(field)}
+                  placeholder="Ajouter un synonyme…"
+                  style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "8px 12px", fontSize: 12 }} />
+                <button onClick={() => addTerm(field)}
+                  style={{ background: C.orange, color: C.white, border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                  +
+                </button>
+              </div>
+            </div>
+          ))}
+
+          <div style={{ fontSize: 10, color: C.text3, textAlign: "center", marginTop: 8 }}>
+            Le vocabulaire est sauvegardé sur cet appareil uniquement
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o: any) => void }) {
   const [url, setUrl] = useState("");
   const [pastedText, setPastedText] = useState("");
   const [step, setStep] = useState("input");
   const [errMsg, setErrMsg] = useState("");
   const [parsed, setParsed] = useState<any>(null);
+  const [showVocabHint, setShowVocabHint] = useState(false);
   const [edited, setEdited] = useState<any>({
     typeVente: "occupe", occupant1Sexe: "F", source: "Manuel",
   });
@@ -1118,6 +1250,15 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
                 </div>
               )}
 
+              {parsed && parsed.source === "Texte collé" && (parsed.confidence || 0) < 0.6 && (
+                <div style={{ background: `${C.yellow}12`, border: `1px solid ${C.yellow}30`, borderRadius: 10, padding: 12, marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: C.yellow, fontWeight: 700 }}>💡 Extraction partielle</div>
+                  <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>
+                    Complète les champs manquants ci-dessous, puis enrichis le <button onClick={() => setShowVocabHint(true)} style={{ background: "none", border: "none", color: C.orange, cursor: "pointer", fontSize: 10, fontWeight: 700, padding: 0, textDecoration: "underline" }}>vocabulaire du parser</button> avec les mots utilisés sur ce site
+                  </div>
+                </div>
+              )}
+
               {/* Type de vente */}
               {btnToggle("Type de vente", [["occupe", "Viager occupé"], ["libre", "Viager libre"], ["terme", "Vente à terme"]], "typeVente")}
 
@@ -1186,6 +1327,7 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
           )}
         </div>
       </div>
+      {showVocabHint && <VocabModal onClose={() => setShowVocabHint(false)} />}
     </div>
   );
 }
@@ -1328,6 +1470,7 @@ export default function ViagerScan() {
   const [filterSource, setFilterSource] = useState("Tous");
   const [search, setSearch] = useState("");
   const [showImport, setShowImport] = useState(false);
+  const [showVocab, setShowVocab] = useState(false);
   const [detail, setDetail] = useState<any>(null);
   const [mobile, setMobile] = useState(false);
   const [dbLoaded, setDbLoaded] = useState(false);
@@ -1540,6 +1683,10 @@ export default function ViagerScan() {
             <span style={{ fontSize: 9, color: C.text3, background: C.bg, padding: "2px 7px", borderRadius: 20, border: `1px solid ${C.border}`, fontWeight: 700, letterSpacing: ".04em" }}>BETA</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowVocab(true)} title="Vocabulaire du parser"
+              style={{ background: C.bg, color: C.text3, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 13 }}>
+              📚
+            </button>
             <button onClick={syncNow} disabled={syncing}
               style={{ background: C.bg, color: syncing ? C.text3 : C.green, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", cursor: syncing ? "wait" : "pointer", fontSize: 12, fontWeight: 600 }}>
               {syncing ? "⏳" : "⟳"}{mobile ? "" : syncing ? " Sync…" : " Sync"}
@@ -1679,6 +1826,7 @@ export default function ViagerScan() {
       </div>
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={addOffre} />}
+      {showVocab && <VocabModal onClose={() => setShowVocab(false)} />}
       {detail && <DetailPanel offre={detail} onClose={() => setDetail(null)} />}
       {signal && <SignalModal offre={signal.offre} onClose={() => setSignal(null)} onCorrect={correctOffre} />}
     </div>
