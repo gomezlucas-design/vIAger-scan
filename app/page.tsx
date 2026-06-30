@@ -771,6 +771,9 @@ function Card({ offre, result, onDetail, onFavori, onRejeter, onSignal, isFavori
               {hasPriceDrop && <Badge color={C.green}>↓ Prix</Badge>}
               {negoScore >= 2 && <Badge color={negoColor}>{negoLabel}</Badge>}
             </div>
+            {!offre.url && offre.reference && (
+              <div style={{ fontSize: 10, color: C.text3, marginTop: 2 }}>📋 {offre.reference}</div>
+            )}
             {pubDate && (
               <div style={{ fontSize: 10, color: C.text3, marginTop: 3 }}>
                 📅 {fmtDate(pubDate)}{ageJours > 0 ? ` · ${fmtAge(ageJours)}` : ""}
@@ -893,6 +896,68 @@ function buildVocabRegex(terms: string[]): string {
   return terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 }
 
+// ─── 200 plus grandes villes françaises avec code postal principal ───────
+const VILLES_FR: Record<string, string> = {
+  "paris":"75000","marseille":"13000","lyon":"69000","toulouse":"31000","nice":"06000",
+  "nantes":"44000","montpellier":"34000","strasbourg":"67000","bordeaux":"33000","lille":"59000",
+  "rennes":"35000","reims":"51100","le havre":"76600","saint-étienne":"42000","toulon":"83000",
+  "grenoble":"38000","dijon":"21000","angers":"49000","nîmes":"30000","villeurbanne":"69100",
+  "saint-denis":"93200","le mans":"72000","aix-en-provence":"13090","clermont-ferrand":"63000",
+  "brest":"29200","tours":"37000","amiens":"80000","limoges":"87000","annecy":"74000",
+  "perpignan":"66000","besançon":"25000","metz":"57000","orléans":"45000","rouen":"76000",
+  "mulhouse":"68100","caen":"14000","boulogne-billancourt":"92100","nancy":"54000","argenteuil":"95100",
+  "saint-paul":"97460","montreuil":"93100","roubaix":"59100","tourcoing":"59200","nanterre":"92000",
+  "avignon":"84000","vitry-sur-seine":"94400","créteil":"94000","dunkerque":"59140","poitiers":"86000",
+  "asnières-sur-seine":"92600","courbevoie":"92400","versailles":"78000","colombes":"92700","fort-de-france":"97200",
+  "aulnay-sous-bois":"93600","saint-pierre":"97410","rueil-malmaison":"92500","pau":"64000","aubervilliers":"93300",
+  "champigny-sur-marne":"94500","antibes":"06600","la rochelle":"17000","saint-maur-des-fossés":"94100","cannes":"06400",
+  "calais":"62100","drancy":"93700","mérignac":"33700","saint-nazaire":"44600","colmar":"68000",
+  "issy-les-moulineaux":"92130","noisy-le-grand":"93160","villeneuve-d'ascq":"59650","valence":"26000","bourges":"18000",
+  "levallois-perret":"92300","neuilly-sur-seine":"92200","quimper":"29000","antony":"92160","évry":"91000",
+  "troyes":"10000","pessac":"33600","clichy":"92110","ivry-sur-seine":"94200","chambéry":"73000",
+  "lorient":"56100","montauban":"82000","sarcelles":"95200","niort":"79000","villejuif":"94800",
+  "saint-quentin":"02100","beziers":"34500","cergy":"95000","la seyne-sur-mer":"83500","hyères":"83400",
+  "épinay-sur-seine":"93800","cholet":"49300","la roche-sur-yon":"85000","fréjus":"83600","arles":"13200",
+  "vénissieux":"69200","châteauroux":"36000","laval":"53000","saint-priest":"69800","brive-la-gaillarde":"19100",
+  "rezé":"44400","grasse":"06130","carcassonne":"11000","chalon-sur-saône":"71100","albi":"81000",
+  "pontault-combault":"77340","cagnes-sur-mer":"06800","alès":"30100","bayonne":"64100","martigues":"13500",
+  "saint-malo":"35400","vannes":"56000","bondy":"93140","mont-de-marsan":"40000","évreux":"27000",
+  "salon-de-provence":"13300","sète":"34200","meaux":"77100","draguignan":"83300","montluçon":"03100",
+  "blois":"41000","angoulême":"16000","douai":"59500","wattrelos":"59150","compiègne":"60200",
+  "charleville-mézières":"08000","istres":"13800","narbonne":"11100","mantes-la-jolie":"78200","la courneuve":"93120",
+  "saint-brieuc":"22000","villepinte":"93420","saint-louis":"97450","gap":"05000","valenciennes":"59300",
+  "thionville":"57100","saint-laurent-du-maroni":"97320","beauvais":"60000","fontenay-sous-bois":"94120","cherbourg-en-cotentin":"50100",
+  "auxerre":"89000","massy":"91300","bagneux":"92220","rosny-sous-bois":"93110","vincennes":"94300",
+  "gennevilliers":"92230","la valette-du-var":"83160","macon":"71000","châtenay-malabry":"92290","cayenne":"97300",
+  "garges-lès-gonesse":"95140","châlons-en-champagne":"51000","bobigny":"93000","menton":"06500","libourne":"33500",
+  "vandœuvre-lès-nancy":"54500","l'haÿ-les-roses":"94240","romans-sur-isère":"26100","alfortville":"94140","saint-herblain":"44800",
+  "ajaccio":"20000","castres":"81100","plaisir":"78370","conflans-sainte-honorine":"78700","clamart":"92140",
+  "stains":"93240","saint-ouen":"93400","talence":"33400","bourg-en-bresse":"01000","trappes":"78190",
+  "schiltigheim":"67300","tarbes":"65000","saint-leu":"97436","rosny-sur-seine":"78710","draveil":"91210",
+  "viry-châtillon":"91170","carpentras":"84200","st germain en laye":"78100","vitrolles":"13127","cambrai":"59400",
+  "agde":"34300","mougins":"06250","st jean de luz":"64500","biarritz":"64200","la baule":"44500",
+  "saint-tropez":"83990","deauville":"14800","chamonix":"74400","megève":"74120","courchevel":"73120",
+};
+
+function detectVilleFromText(text: string): { ville: string; codePostal: string } | null {
+  const t = text.toLowerCase();
+  // Chercher d'abord ville (CP) format explicite
+  const explicit = text.match(/([A-ZÀ-Ü][a-zà-üA-ZÀ-Ü\-' ]+?)\s*\((\d{5})\)/);
+  if (explicit) return { ville: explicit[1].trim(), codePostal: explicit[2] };
+
+  // Chercher dans la base des villes connues — la plus longue correspondance d'abord
+  const sorted = Object.keys(VILLES_FR).sort((a, b) => b.length - a.length);
+  for (const villeKey of sorted) {
+    const re = new RegExp(`\\b${villeKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (re.test(t)) {
+      // Capitaliser proprement
+      const display = villeKey.split(/[\s-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(villeKey.includes("-") ? "-" : " ");
+      return { ville: display, codePostal: VILLES_FR[villeKey] };
+    }
+  }
+  return null;
+}
+
 function parsePastedText(text: string): { data: any; confidence: number } {
   const clean = text.replace(/\s+/g, " ").trim();
   const data: any = {};
@@ -955,28 +1020,56 @@ function parsePastedText(text: string): { data: any; confidence: number } {
     }
   }
 
+  // Valeur vénale occupée — terme spécifique parfois utilisé en plus de "valeur vénale"
+  if (!data.valeurVenale) {
+    const vvOccRe = /valeur\s*v[eé]nale\s*occup[eé]e?[^\d€]{0,10}([0-9][0-9\s]{4,8})\s*€?/i;
+    data.valeurVenale = extractNum(vvOccRe, 10000, 5000000);
+  }
+
   data.superficie = extractNum(/([0-9]{2,3})\s*m²?\s*(?:carrez|habitable|loi)/i, 10, 500)
     ?? extractNum(/superficie[^\d]{0,5}([0-9]{2,3})\s*m/i, 10, 500)
     ?? extractNum(/([0-9]{2,3})\s*m²/i, 10, 500);
 
-  data.taxeFonciere = extractNum(/taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
+  // Exclut les années 2020-2029 confondues avec des montants (ex: "2025" pris pour TF)
+  const isAnnee = (v: number) => v >= 2020 && v <= 2029;
+
+  // TF — cherche le montant juste avant "€" ou "euros" en priorité (plus fiable)
+  let tfCandidate = extractNum(/taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,15}([0-9][0-9\s]{2,6})\s*(?:€|euros)/i, 100, 10000)
+    ?? extractNum(/taxe\s*fonci[eè]re\s*(?:hors\s*TEOM)?[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?/i, 100, 10000)
     ?? extractNum(/TF\s*(?:hors\s*TEOM)?[^\d€]{0,5}([0-9][0-9\s]{2,5})\s*€?/, 100, 10000);
+  if (tfCandidate && isAnnee(tfCandidate)) {
+    // Probable confusion avec une année — chercher le prochain montant après "€"
+    const tfRetry = clean.match(/taxe\s*fonci[eè]re[\s\S]{0,40}?(\d{3,5})\s*€/i);
+    tfCandidate = tfRetry ? parseInt(tfRetry[1]) : undefined;
+  }
+  data.taxeFonciere = tfCandidate;
 
   const chargesVocabRe = new RegExp(`(?:${buildVocabRegex(vocab.chargesCopro)})[^\\d€]{0,10}([0-9][0-9\\s]{2,6})\\s*€?\\s*(\\/\\s*(?:an|trim|mois))?`, "i");
-  const chgMatch = clean.match(chargesVocabRe)
+  let chgMatch = clean.match(chargesVocabRe)
     ?? clean.match(/charges[^\d€]{0,10}([0-9][0-9\s]{2,6})\s*€?\s*\/\s*(?:an|trim|mois)/i);
   if (chgMatch) {
     let val = parseInt(chgMatch[1].replace(/\s/g, ""));
+    if (isAnnee(val)) {
+      // Confusion avec une année — chercher montant suivant "€" après "charges"
+      const retry = clean.match(/charges[\s\S]{0,40}?(\d{3,6})\s*€/i);
+      val = retry ? parseInt(retry[1]) : 0;
+    }
     if (/trim/i.test(chgMatch[0])) val *= 4;
     if (/mois/i.test(chgMatch[0])) val *= 12;
     if (val >= 100 && val <= 15000) data.chargesCopro = val;
   }
 
-  const villeCP = clean.match(/([A-ZÀ-Ü][a-zà-ü]+(?:[\s\-][A-ZÀ-Ü][a-zà-ü]+)*)\s*\((\d{5})\)/i);
-  if (villeCP) {
-    data.ville = villeCP[1].trim();
-    data.codePostal = villeCP[2];
+  // Ville — base des 200 plus grandes villes françaises + détection format "Ville (CP)"
+  const villeDetect = detectVilleFromText(clean);
+  if (villeDetect) {
+    data.ville = villeDetect.ville;
+    data.codePostal = villeDetect.codePostal;
   }
+
+  // Référence annonce — utile si pas d'URL fournie
+  const refMatch = clean.match(/r[eé]f(?:[eé]rence)?\.?\s*:?\s*([A-Z0-9][A-Z0-9.\-\/]{2,15})/i)
+    ?? clean.match(/n°\s*(?:annonce|offre)?\s*:?\s*([A-Z0-9][A-Z0-9.\-\/]{2,15})/i);
+  if (refMatch) data.reference = refMatch[1].trim();
 
   const keysTerme = ["bouquet", "mensualite", "termeMois"];
   const keysViager = ["bouquet", "rente", "superficie", "occupant1Age", "valeurVenale"];
@@ -1314,7 +1407,12 @@ function ImportModal({ onClose, onImport }: { onClose: () => void; onImport: (o:
               </div>
 
               {/* URL optionnel */}
-              {!url.trim() && txtField("URL de l'annonce (optionnel)", "url", "https://...")}
+              {!url.trim() && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {txtField("URL de l'annonce (optionnel)", "url", "https://...")}
+                  {txtField("Référence annonce", "reference", "Réf. 9935.B")}
+                </div>
+              )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button onClick={add}
